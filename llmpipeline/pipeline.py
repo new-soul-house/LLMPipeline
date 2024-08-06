@@ -133,8 +133,9 @@ class LLMPipeline:
 
         # add style
         for k, d in def_dict.items():
-            mermaid += f'{indent}classDef {k.upper()} {d["style"]}\n'
-            mermaid += f'{indent}class {",".join(d["item"])} {k.upper()}\n'
+            if d['item']:
+                mermaid += f'{indent}classDef {k.upper()} {d["style"]}\n'
+                mermaid += f'{indent}class {",".join(d["item"])} {k.upper()}\n'
 
         return mermaid
 
