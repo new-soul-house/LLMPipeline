@@ -17,6 +17,33 @@ class LLMPipeline:
         self.data = data
         self.llm_backend = llm_backend
         self.rag_backend = rag_backend
+        self._check_pipe()
+    
+    def _check_pipe(self):
+        pipe_names = set(self.pipe.keys())
+        conflict_err = 'conflict between the pipe name and the data name'
+        for e in self.pipe:
+            p = self.pipe[e]
+            for i in p.get('inp', []):
+                if i in pipe_names:
+                    log.error(f'{conflict_err}: "{i}"')
+                    exit()
+            
+            if (out := p.get('out', None)):
+                if (t := type(out)) is str:
+                    if out in pipe_names:
+                        log.error(f'{conflict_err}: "{out}"')
+                        exit()
+                elif t is list:
+                    for o in out:
+                        if o in pipe_names:
+                            log.error(f'{conflict_err}: "{out}"')
+                            exit()
+                elif t is dict:
+                    for o in out.values():
+                        if o in pipe_names:
+                            log.error(f'{conflict_err}: "{out}"')
+                            exit()
 
     def pipe2mermaid(self, start_entry, pipes, info=None):
         pipe = copy.deepcopy(pipes)
@@ -51,6 +78,7 @@ class LLMPipeline:
         }
 
         defines = []
+        # todo: here can from start_entry
         for e in pipe:
             m = pipe[e]['mode']
             def_dict[m]['item'].add(e)
@@ -381,7 +409,7 @@ class LLMPipeline:
             'total_time': time.time()-start_t,
             'mermaid': {},
         }
-        for k in sorted(pipe_manager, key=lambda k: pipe_manager[k].time):
+        for k in sorted(pipe_manager, key=lambda k: pipe_manager[k].time or -1):
             info['detail'][k] = {
                 'run_time': list(pipe_manager[k].run_time),
                 'avg_time': pipe_manager[k].time,

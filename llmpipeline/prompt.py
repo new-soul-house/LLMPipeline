@@ -8,6 +8,7 @@ class Prompt:
     def __call__(self, *inps):
         t = self.text
         for a, b in zip(self.keys, inps):
-            if type(b) is not str: b = json.dumps(b, ensure_ascii=False)
+            if b is None: b = str(b)
+            elif type(b) is not str: b = json.dumps(b, ensure_ascii=False)
             t = t.replace(a, b)
         return t

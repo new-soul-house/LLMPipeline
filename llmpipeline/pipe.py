@@ -4,10 +4,11 @@ import json
 from .log import log
 
 class LLMPipe:
-    def __init__(self, name, prompt=None, format=None, llm=None, verbose=True, retry=5, inp=None, out=None, run_time=None, lock=None, **kargs):
+    def __init__(self, name, prompt=None, return_json=True, format=None, llm=None, verbose=True, retry=5, inp=None, out=None, run_time=None, lock=None, **kargs):
         self.name = name
         self.prompt = prompt
         self.llm = llm
+        self.return_json = return_json
         self.format = format
         self.run_time = run_time if run_time is not None else []
         self.verbose = verbose
@@ -30,14 +31,17 @@ class LLMPipe:
             self.log('prompt', text)
             resp = self.llm(text)
             self.log('resp', resp)
-            out = self._json(resp)
-            self.log('json', out)
+            if self.return_json:
+                out = self._json(resp)
+                self.log('json', out)
 
-            if out and all(map(lambda x: x[0] in out and type(out[x[0]]) is x[1], self.format.items())):
-                self.log(f'check {self.format}', '✓')
+                if out and all(map(lambda x: x[0] in out and type(out[x[0]]) is x[1], self.format.items())):
+                    self.log(f'check {self.format}', '✓')
+                else:
+                    self.log(f'check {self.format}', '✗')
+                    out = None
             else:
-                self.log(f'check {self.format}', '✗')
-                out = None
+                out = resp
 
             t = time.time() - start_t
             self.log('cost time', t)
