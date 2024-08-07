@@ -25,9 +25,15 @@ class LLMPipeline:
         for e in self.pipe:
             p = self.pipe[e]
             for i in p.get('inp', []):
-                if i in pipe_names:
-                    log.error(f'{conflict_err}: "{i}"')
-                    exit()
+                if type(i) is dict:
+                    for v in i.values():
+                        if v in pipe_names:
+                            log.error(f'{conflict_err}: "{i}"')
+                            exit()
+                else:
+                    if i in pipe_names:
+                        log.error(f'{conflict_err}: "{i}"')
+                        exit()
             
             if (out := p.get('out', None)):
                 if (t := type(out)) is str:
