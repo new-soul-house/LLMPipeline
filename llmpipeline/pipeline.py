@@ -12,13 +12,13 @@ from .pipe import LLMPipe, RAGPipe
 from .utils import check_cmd_exist
 
 class LLMPipeline:
-    def __init__(self, pipe, data, llm_backend, rag_backend):
+    def __init__(self, pipe, llm_backend, rag_backend):
         self.pipe = pipe
-        self.data = data
         self.llm_backend = llm_backend
         self.rag_backend = rag_backend
         self._check_pipe()
-    
+        self._init()
+
     def _check_pipe(self):
         pipe_names = set(self.pipe.keys())
         conflict_err = 'conflict between the pipe name and the data name'
@@ -50,6 +50,30 @@ class LLMPipeline:
                         if o in pipe_names:
                             log.error(f'{conflict_err}: "{out}"')
                             exit()
+
+    def _init(self):
+        pipe = self.pipe
+        self.manager = mp.Manager()
+        self.lock = self.manager.Lock()
+
+        pipe_manager = {}
+        for e in pipe:
+            match pipe[e]['mode']:
+                case 'llm':
+                    if 'llm_backend' in pipe[e]:
+                        llm_backend = pipe[e]['llm_backend']
+                        del pipe[e]['llm_backend']
+                    else:
+                        llm_backend = self.llm_backend
+                    pipe_manager[e] = LLMPipe(e, run_time=self.manager.list(), llm=llm_backend, lock=self.lock, **pipe[e])
+                case 'rag':
+                    if 'rag_backend' in pipe[e]:
+                        rag_backend = pipe[e]['rag_backend']
+                        del pipe[e]['rag_backend']
+                    else:
+                        rag_backend = self.rag_backend
+                    pipe_manager[e] = RAGPipe(e, run_time=self.manager.list(), rag=rag_backend, lock=self.lock, **pipe[e])
+        self.pipe_manager = pipe_manager
 
     def pipe2mermaid(self, start_entry, pipes, info=None):
         pipe = copy.deepcopy(pipes)
@@ -367,33 +391,14 @@ class LLMPipeline:
                 else:
                     task_queue.put((entry, pipes))
 
-    def run(self, start_entry, core_num=4, save_pref=False):
-        pipe, data = copy.deepcopy(self.pipe), self.data
+    def run(self, start_entry, data, core_num=4, save_pref=False):
+        pipe = copy.deepcopy(self.pipe)
+        pipe_manager, lock = self.pipe_manager, self.lock
         start_t = time.time()
-        manager = mp.Manager()
-        task_queue = manager.Queue()
-        perf_queue = manager.Queue()
-        lock = manager.Lock()
-        result = manager.dict()
+        task_queue = self.manager.Queue()
+        perf_queue = self.manager.Queue()
+        result = self.manager.dict()
         for k, v in data.items(): result[k] = v
-
-        pipe_manager = {}
-        for e in pipe:
-            match pipe[e]['mode']:
-                case 'llm':
-                    if 'llm_backend' in pipe[e]:
-                        llm_backend = pipe[e]['llm_backend']
-                        del pipe[e]['llm_backend']
-                    else:
-                        llm_backend = self.llm_backend
-                    pipe_manager[e] = LLMPipe(e, run_time=manager.list(), llm=llm_backend, lock=lock, **pipe[e])
-                case 'rag':
-                    if 'rag_backend' in pipe[e]:
-                        rag_backend = pipe[e]['rag_backend']
-                        del pipe[e]['rag_backend']
-                    else:
-                        rag_backend = self.rag_backend
-                    pipe_manager[e] = RAGPipe(e, run_time=manager.list(), rag=rag_backend, lock=lock, **pipe[e])
 
         task_queue.put((start_entry, pipe))
         processes = []
@@ -417,7 +422,7 @@ class LLMPipeline:
         }
         for k in sorted(pipe_manager, key=lambda k: pipe_manager[k].time or -1):
             info['detail'][k] = {
-                'run_time': list(pipe_manager[k].run_time),
+                # 'run_time': list(pipe_manager[k].run_time),
                 'avg_time': pipe_manager[k].time,
             }
 
