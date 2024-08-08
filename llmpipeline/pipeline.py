@@ -368,7 +368,7 @@ class LLMPipeline:
                     task_queue.put((entry, pipes))
 
     def run(self, start_entry, core_num=4, save_pref=False):
-        pipe, data = self.pipe, self.data
+        pipe, data = copy.deepcopy(self.pipe), self.data
         start_t = time.time()
         manager = mp.Manager()
         task_queue = manager.Queue()
