@@ -24,7 +24,6 @@ data = {
 # set pipeline
 demo_pipe = {
     'process_input': {
-        'mode': 'llm',
         'prompt': example_prompt,
         'return_json': False,
         'inp': ['inp'],
@@ -32,7 +31,6 @@ demo_pipe = {
         'next': ['rag1'],
     },
     'rag1': {
-        'mode': 'rag',
         'inp': ['out1'],
         'out': 'out2',
         'next': ['exit'],
@@ -40,6 +38,6 @@ demo_pipe = {
 }
 
 # running pipeline
-pipeline = LLMPipeline(demo_pipe, data, llm_api, rag_api)
-result, info = pipeline.run('process_input', core_num=2, save_pref=True)
+pipeline = LLMPipeline(demo_pipe, llm_api, rag_api)
+result, info = pipeline.run(data, core_num=2, save_pref=True)
 

@@ -17,6 +17,7 @@ class LLMPipeline:
         self.pipe = pipe
         self.llm_backend = llm_backend
         self.rag_backend = rag_backend
+        self.start_entry = None
         self._check_pipe()
         self._init()
 
@@ -59,6 +60,10 @@ class LLMPipeline:
 
         pipe_manager = {}
         for e in pipe:
+            if 'prompt' in pipe[e]: pipe[e]['mode'] = 'llm'
+            elif 'pipe_in_loop' in pipe[e]: pipe[e]['mode'] = 'loop'
+            else: pipe[e]['mode'] = 'rag'
+
             match pipe[e]['mode']:
                 case 'llm':
                     if 'llm_backend' in pipe[e]:
@@ -75,8 +80,26 @@ class LLMPipeline:
                         rag_backend = self.rag_backend
                     pipe_manager[e] = RAGPipe(e, run_time=self.manager.list(), rag=rag_backend, lock=self.lock, **pipe[e])
         self.pipe_manager = pipe_manager
+        log.debug(f'Pipe manager initialization successful')
+        
+        if self.start_entry is None: self._find_start_entry()
+        if self.start_entry is None:
+            log.error(f"Can't find start entry in pipes.")
+            exit()
+        log.debug(f'Start entry: {self.start_entry}')
 
-    def pipe2mermaid(self, start_entry, pipes, info=None):
+    def _find_start_entry(self):
+        pipe = self.pipe
+        
+        deps = set()
+        for e in pipe:
+            deps.update(pipe[e].get('next', []))
+            deps.update(pipe[e].get('pipe_in_loop', []))
+        
+        se = list(set(pipe.keys()) - deps)
+        if se: self.start_entry = se
+
+    def pipe2mermaid(self, pipes, info=None):
         pipe = copy.deepcopy(pipes)
         mermaid = 'graph TD\n'
         indent = ' '*4
@@ -137,7 +160,7 @@ class LLMPipeline:
 
         # bfs
         links = set()
-        items = [start_entry]
+        items = self.start_entry[:]
         while items:
             e = items.pop(0)
             if e == 'exit': continue
@@ -400,7 +423,7 @@ class LLMPipeline:
             task_queue.put(('exit', {}))
             log.debug(f'{name}, exit')
 
-    def run(self, start_entry, data, core_num=4, save_pref=False):
+    def run(self, data, core_num=4, save_pref=False):
         pipe = copy.deepcopy(self.pipe)
         pipe_manager, lock = self.pipe_manager, self.lock
         start_t = time.time()
@@ -409,7 +432,7 @@ class LLMPipeline:
         result = self.manager.dict()
         for k, v in data.items(): result[k] = v
 
-        task_queue.put((start_entry, pipe))
+        for se in self.start_entry: task_queue.put((se, pipe))
         processes = []
         for i in range(core_num):
             p = mp.Process(target=self.task_process, args=(i, task_queue, perf_queue, pipe_manager, result, lock))
@@ -436,7 +459,7 @@ class LLMPipeline:
             }
 
         if save_pref:
-            info['mermaid']['pipe'] = self.pipe2mermaid(start_entry, pipe, info)
+            info['mermaid']['pipe'] = self.pipe2mermaid(pipe, info)
             info['mermaid']['perf'] = self.perf2mermaid(perf, pipe)
             fname = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
             if check_cmd_exist('mmdc'):
