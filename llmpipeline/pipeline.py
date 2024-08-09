@@ -5,6 +5,7 @@ import json
 import copy
 import queue
 import datetime
+import traceback
 import collections
 import multiprocessing as mp
 from .log import log
@@ -231,76 +232,131 @@ class LLMPipeline:
         name = f'pid: {pid}'
         log.debug(f'{name}, start')
 
-        while True:
-            start_time = time.time()
-            try:
-                entry, pipes = task_queue.get_nowait()
-                # log.debug(f'{name}, get entry: {entry}')
-                if entry == 'exit':
-                    if task_queue.qsize() == 0:
-                        task_queue.put((entry, pipes))
-                        break
-                    else: continue
-            except queue.Empty:
-                # log.debug(f'{name}, queue empty, wait new task ...')
-                # break
-                continue
-
-            param = pipes[entry]
-            match param['mode']:
-                case 'llm':
-                    pipe = pipe_manager[entry]
-                case 'rag':
-                    pipe = pipe_manager[entry]
-                case 'loop':
-                    with lock: data[entry] = {param['inp']: data[param['inp']]}
-                    n = len(data[param['inp']])
-
-                    for i, item in enumerate(data[param['inp']]):
-                        nps = copy.deepcopy(pipes)
-
-                        for nt in param['pipe_in_loop']:
-                            nps[nt]['loop'] = entry
-                            nps[nt]['loop_index'] = i
-                            o = nps[nt]['out']
-                            with lock:
-                                if type(o) is str:
-                                    pre = data[entry]
-                                    pre[o] = [None] * n
-                                    data[entry] = pre
-                                elif type(o) is list:
-                                    for j in o:
-                                        pre = data[entry]
-                                        pre[j] = [None] * n
-                                        data[entry] = pre
-                                elif type(o) is dict:
-                                    for j in o.values():
-                                        pre = data[entry]
-                                        pre[j] = [None] * n
-                                        data[entry] = pre
-
-                            task_queue.put((nt, nps))
-                    
-                    loop_end_entry = f'{entry}_end'
-                    pipes |= {loop_end_entry: {
-                        'mode': 'loop_end',
-                        'loop': entry,
-                        'next': param['next'],
-                    }}
-                    task_queue.put((loop_end_entry, pipes))
-                    perf_queue.put((name, entry, start_time, time.time()))
+        try:
+            while True:
+                start_time = time.time()
+                try:
+                    entry, pipes = task_queue.get_nowait()
+                    # log.debug(f'{name}, get entry: {entry}')
+                    if entry == 'exit':
+                        if task_queue.qsize() == 0:
+                            task_queue.put((entry, pipes))
+                            log.debug(f'{name}, exit')
+                            break
+                        else: continue
+                except queue.Empty:
+                    # log.debug(f'{name}, queue empty, wait new task ...')
+                    # break
                     continue
-                case 'loop_end':
-                    has_done = []
-                    for v in data[param['loop']].values():
-                        has_done.append(all([i is not None for i in v]))
 
-                    if all(has_done):
-                        loop_data = data[param['loop']]
-                        with lock:
-                            for k,v in loop_data.items():
-                                if k not in data: data[k] = v
-                            del data[param['loop']]
+                param = pipes[entry]
+                match param['mode']:
+                    case 'llm':
+                        pipe = pipe_manager[entry]
+                    case 'rag':
+                        pipe = pipe_manager[entry]
+                    case 'loop':
+                        with lock: data[entry] = {param['inp']: data[param['inp']]}
+                        n = len(data[param['inp']])
+
+                        for i, item in enumerate(data[param['inp']]):
+                            nps = copy.deepcopy(pipes)
+
+                            for nt in param['pipe_in_loop']:
+                                nps[nt]['loop'] = entry
+                                nps[nt]['loop_index'] = i
+                                o = nps[nt]['out']
+                                with lock:
+                                    if type(o) is str:
+                                        pre = data[entry]
+                                        pre[o] = [None] * n
+                                        data[entry] = pre
+                                    elif type(o) is list:
+                                        for j in o:
+                                            pre = data[entry]
+                                            pre[j] = [None] * n
+                                            data[entry] = pre
+                                    elif type(o) is dict:
+                                        for j in o.values():
+                                            pre = data[entry]
+                                            pre[j] = [None] * n
+                                            data[entry] = pre
+
+                                task_queue.put((nt, nps))
+                        
+                        loop_end_entry = f'{entry}_end'
+                        pipes |= {loop_end_entry: {
+                            'mode': 'loop_end',
+                            'loop': entry,
+                            'next': param['next'],
+                        }}
+                        task_queue.put((loop_end_entry, pipes))
+                        perf_queue.put((name, entry, start_time, time.time()))
+                        continue
+                    case 'loop_end':
+                        has_done = []
+                        for v in data[param['loop']].values():
+                            has_done.append(all([i is not None for i in v]))
+
+                        if all(has_done):
+                            loop_data = data[param['loop']]
+                            with lock:
+                                for k,v in loop_data.items():
+                                    if k not in data: data[k] = v
+                                del data[param['loop']]
+
+                            if 'next' in param:
+                                for e in param['next']:
+                                    task_queue.put((e, pipes))
+                            perf_queue.put((name, entry, start_time, time.time()))
+                        else:
+                            task_queue.put((entry, pipes))
+                        continue
+
+                if 'loop' in param:
+                    has_inp = []
+                    for i in param['inp']:
+                        if type(i) is str:
+                            has_inp.append(i in data or (i in data[param['loop']] and data[param['loop']][i][param['loop_index']] is not None))
+                        elif type(i) is dict:
+                            for j in i.values():
+                                has_inp.append(j in data or (j in data[param['loop']] and data[param['loop']][j][param['loop_index']] is not None))
+
+                    if all(has_inp):
+                        inps = []
+                        for i in param['inp']:
+                            if type(i) is str:
+                                if i in data[param['loop']]:
+                                    inps.append(data[param['loop']][i][param['loop_index']])
+                                else:
+                                    inps.append(data[i])
+                            elif type(i) is dict:
+                                d = {}
+                                for k, v in i.items():
+                                    if v in data[param['loop']]:
+                                        d[k] = data[param['loop']][v][param['loop_index']]
+                                    else:
+                                        d[k] = data[v]
+                                inps.append(d)
+
+                        out = pipe(*inps)
+                        if type(param['out']) is str:
+                            with lock:
+                                pre = data[param['loop']]
+                                pre[param['out']][param['loop_index']] = out
+                                data[param['loop']] = pre
+                        elif type(param['out']) is list:
+                            with lock:
+                                pre = data[param['loop']]
+                                for k in param['out']:
+                                    pre[k][param['loop_index']] = out[k]
+                                data[param['loop']] = pre
+                        elif type(param['out']) is dict:
+                            with lock:
+                                pre = data[param['loop']]
+                                for k in param['out']:
+                                    pre[param['out'][k]][param['loop_index']] = out[k]
+                                data[param['loop']] = pre
 
                         if 'next' in param:
                             for e in param['next']:
@@ -308,88 +364,41 @@ class LLMPipeline:
                         perf_queue.put((name, entry, start_time, time.time()))
                     else:
                         task_queue.put((entry, pipes))
-                    continue
-
-            if 'loop' in param:
-                has_inp = []
-                for i in param['inp']:
-                    if type(i) is str:
-                        has_inp.append(i in data or (i in data[param['loop']] and data[param['loop']][i][param['loop_index']] is not None))
-                    elif type(i) is dict:
-                        for j in i.values():
-                            has_inp.append(j in data or (j in data[param['loop']] and data[param['loop']][j][param['loop_index']] is not None))
-
-                if all(has_inp):
-                    inps = []
-                    for i in param['inp']:
-                        if type(i) is str:
-                            if i in data[param['loop']]:
-                                inps.append(data[param['loop']][i][param['loop_index']])
-                            else:
+                else:
+                    has_inp = all(i in data for i in param['inp'])
+                    if has_inp:
+                        inps = []
+                        for i in param['inp']:
+                            if type(i) is str:
                                 inps.append(data[i])
-                        elif type(i) is dict:
-                            d = {}
-                            for k, v in i.items():
-                                if v in data[param['loop']]:
-                                    d[k] = data[param['loop']][v][param['loop_index']]
-                                else:
-                                    d[k] = data[v]
-                            inps.append(d)
+                            elif type(i) is dict:
+                                inps.append({k:data[v] for k, v in i.items()})
 
-                    out = pipe(*inps)
-                    if type(param['out']) is str:
-                        with lock:
-                            pre = data[param['loop']]
-                            pre[param['out']][param['loop_index']] = out
-                            data[param['loop']] = pre
-                    elif type(param['out']) is list:
-                        with lock:
-                            pre = data[param['loop']]
-                            for k in param['out']:
-                                pre[k][param['loop_index']] = out[k]
-                            data[param['loop']] = pre
-                    elif type(param['out']) is dict:
-                        with lock:
-                            pre = data[param['loop']]
-                            for k in param['out']:
-                                pre[param['out'][k]][param['loop_index']] = out[k]
-                            data[param['loop']] = pre
+                        out = pipe(*inps)
+                        if type(param['out']) is str:
+                            with lock:
+                                data[param['out']] = out
+                        elif type(param['out']) is list:
+                            with lock:
+                                for k in param['out']:
+                                    data[k] = out[k]
+                        elif type(param['out']) is dict:
+                            with lock:
+                                for k in param['out']:
+                                    data[param['out'][k]] = out[k]
 
-                    if 'next' in param:
-                        for e in param['next']:
-                            task_queue.put((e, pipes))
-                    perf_queue.put((name, entry, start_time, time.time()))
-                else:
-                    task_queue.put((entry, pipes))
-            else:
-                has_inp = all(i in data for i in param['inp'])
-                if has_inp:
-                    inps = []
-                    for i in param['inp']:
-                        if type(i) is str:
-                            inps.append(data[i])
-                        elif type(i) is dict:
-                            inps.append({k:data[v] for k, v in i.items()})
-
-                    out = pipe(*inps)
-                    if type(param['out']) is str:
-                        with lock:
-                            data[param['out']] = out
-                    elif type(param['out']) is list:
-                        with lock:
-                            for k in param['out']:
-                                data[k] = out[k]
-                    elif type(param['out']) is dict:
-                        with lock:
-                            for k in param['out']:
-                                data[param['out'][k]] = out[k]
-
-                    if 'next' in param:
-                        for e in param['next']:
-                            task_queue.put((e, pipes))
-                    perf_queue.put((name, entry, start_time, time.time()))
-                else:
-                    task_queue.put((entry, pipes))
+                        if 'next' in param:
+                            for e in param['next']:
+                                task_queue.put((e, pipes))
+                        perf_queue.put((name, entry, start_time, time.time()))
+                    else:
+                        task_queue.put((entry, pipes))
+        except Exception as e:
+            error_msg = traceback.format_exc()
+            with lock: data['error_msg'] = error_msg
+            log.error(f'[{name}]:\n{error_msg}')
+            task_queue.put(('exit', {}))
+            log.debug(f'{name}, exit')
 
     def run(self, start_entry, data, core_num=4, save_pref=False):
         pipe = copy.deepcopy(self.pipe)
