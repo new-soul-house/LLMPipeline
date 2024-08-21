@@ -93,12 +93,12 @@ class RAGPipe:
                 self.log('inp', i)
                 o = self.rag(i)
                 self.log('out', o)
-                if len(o): out.append(o)
+                if o is not None and len(o): out.append(o)
         else:
             self.log('inp', inp)
             o = self.rag(inp)
             self.log('out', o)
-            if len(o):
+            if o is not None and len(o):
                 if self.return_key:
                     o = eval(f'o{self.return_key}')
                     self.log('return_key', o)
