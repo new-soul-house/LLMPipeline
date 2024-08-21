@@ -7,10 +7,15 @@ import queue
 import datetime
 import traceback
 import collections
+from enum import Enum
 import multiprocessing as mp
 from .log import log
 from .pipe import LLMPipe, RAGPipe
 from .utils import check_cmd_exist
+
+class State(Enum):
+    WAIT = 0
+    DONE = 1
 
 class LLMPipeline:
     def __init__(self, pipe, llm_backend, rag_backend):
@@ -262,11 +267,11 @@ class LLMPipeline:
                     entry, pipes = task_queue.get_nowait()
                     # log.debug(f'{name}, get entry: {entry}')
                     if entry == 'exit':
-                        if task_queue.qsize() == 0:
-                            task_queue.put((entry, pipes))
-                            log.debug(f'{name}, exit')
-                            break
-                        else: continue
+                        # if task_queue.qsize() == 0:
+                        task_queue.put((entry, pipes))
+                        log.debug(f'{name}, exit')
+                        break
+                        # else: continue
                 except queue.Empty:
                     # log.debug(f'{name}, queue empty, wait new task ...')
                     # break
@@ -306,7 +311,7 @@ class LLMPipeline:
                                             data[entry] = pre
 
                                 task_queue.put((nt, nps))
-                        
+
                         loop_end_entry = f'{entry}_end'
                         pipes |= {loop_end_entry: {
                             'mode': 'loop_end',
@@ -458,7 +463,7 @@ class LLMPipeline:
                 'avg_time': pipe_manager[k].time,
             }
 
-        if save_pref:
+        if save_pref and 'error_msg' not in r:
             info['mermaid']['pipe'] = self.pipe2mermaid(pipe, info)
             info['mermaid']['perf'] = self.perf2mermaid(perf, pipe)
             fname = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
