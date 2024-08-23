@@ -5,9 +5,11 @@ import json
 import copy
 import queue
 import datetime
+import importlib
 import traceback
 import collections
 from enum import Enum
+from pathlib import Path
 import multiprocessing as mp
 from .log import log
 from .pipe import LLMPipe, RAGPipe
@@ -490,3 +492,34 @@ class LLMPipeline:
 
         # breakpoint()
         return r, info
+
+class PipelineManager:
+    def __init__(self, pipes_dir, prompt_manager, llm_client=None, rag_client=None):
+        log.debug('Setup PipelineManager')
+        self.pipes_dir = Path(pipes_dir)
+        self.prompt_manager = prompt_manager
+        self.llm_client = llm_client
+        self.rag_client = rag_client
+        self.pipes = {}
+        self.load_pipes()
+
+    def load_pipes(self):
+        self.pipes = {}
+        log.debug(f'Start load pipelines: {self.pipes_dir}')
+        pipe_files = list(self.pipes_dir.glob('*_pipe.py'))
+        log.debug(f'Find {len(pipe_files)} pipeline files: {[p.stem for p in pipe_files]}')
+
+        for pf in pipe_files:
+            m = importlib.import_module(f'{str(self.pipes_dir).replace("/",".")}.{pf.stem}')
+            conf = copy.deepcopy(m.pipe)
+            for k in m.pipe:
+                if 'prompt' in m.pipe[k]:
+                    m.pipe[k]['prompt'] = self.prompt_manager.prompts[m.pipe[k]['prompt']]
+
+            self.pipes[pf.stem] = {
+                'file': pf,
+                'conf': conf,
+                'func': LLMPipeline(m.pipe, self.llm_client, self.rag_client)
+            }
+
+        log.debug('All pipelines loaded')
