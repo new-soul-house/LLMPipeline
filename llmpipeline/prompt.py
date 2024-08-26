@@ -38,7 +38,7 @@ class Prompt:
 
     @property
     def keys(self):
-        return self.__keys
+        return self.__keys[:]
 
     @keys.setter
     def keys(self, value):

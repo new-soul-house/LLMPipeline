@@ -80,7 +80,11 @@ class LLMPipeline:
                         llm_backend = self.llm_backend
                     pipe_manager[e] = LLMPipe(e, run_time=self.manager.list(), llm=llm_backend, lock=self.lock, **pipe[e])
                 case 'rag':
-                    if 'rag_backend' in pipe[e]:
+                    if 'rag_param' in pipe[e]:
+                        param = dict(pipe[e]['rag_param'])
+                        rag_backend = lambda x: self.rag_backend(x, **param)
+                        del pipe[e]['rag_param']
+                    elif 'rag_backend' in pipe[e]:
                         rag_backend = pipe[e]['rag_backend']
                         del pipe[e]['rag_backend']
                     else:
@@ -523,3 +527,15 @@ class PipelineManager:
             }
 
         log.debug('All pipelines loaded')
+
+    def export_pipe_conf(self):
+        conf = {k: v['conf'] for k,v in self.pipes.items()}
+        for c in conf.values():
+            for pipe_conf in c.values():
+                if 'format' in pipe_conf:
+                    for k, v in pipe_conf['format'].items():
+                        pipe_conf['format'][k] = str(v)
+        return conf
+
+    def update_pipe(self):
+        raise NotImplementedError
