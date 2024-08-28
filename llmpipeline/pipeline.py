@@ -529,7 +529,7 @@ class PipelineManager:
         log.debug('All pipelines loaded')
 
     def export_pipe_conf(self):
-        conf = {k: v['conf'] for k,v in self.pipes.items()}
+        conf = {k: copy.deepcopy(v['conf']) for k,v in self.pipes.items()}
         for c in conf.values():
             for pipe_conf in c.values():
                 if 'format' in pipe_conf:
@@ -537,5 +537,38 @@ class PipelineManager:
                         pipe_conf['format'][k] = str(v)
         return conf
 
-    def update_pipe(self):
-        raise NotImplementedError
+    def update_pipe(self, pipe_name, pipe_data):
+        if pipe_name.endswith('_pipe'):
+            pipe_file = self.pipes_dir / f'{pipe_name}.py'
+
+            try:
+                content = json.dumps(pipe_data, indent=4, ensure_ascii=False)
+                content = re.sub(r'"<class \'(.*)\'>"', r'\1', content)
+
+                conf = pipe_data
+                for pipe_conf in conf.values():
+                    if 'format' in pipe_conf:
+                        for k, v in pipe_conf['format'].items():
+                            pipe_conf['format'][k] = eval(v.replace("<class '","").replace("'>",""))
+
+                pipe = copy.deepcopy(conf)
+                for k in pipe:
+                    if 'prompt' in pipe[k]:
+                        pipe[k]['prompt'] = self.prompt_manager.prompts[pipe[k]['prompt']]
+
+                self.pipes[pipe_name] = {
+                    'file': pipe_file,
+                    'conf': conf,
+                    'func': LLMPipeline(pipe, self.llm_client, self.rag_client)
+                }
+
+                with open(pipe_file, 'w') as f:
+                    content = 'pipe = ' + content + '\n'
+                    f.write(content)
+                
+                log.debug(f'Save pipeline "{pipe_name}":\n{content}')
+                return f'Successfully saved {pipe_name}'
+            except Exception as e:
+                return f'Error: {e}'
+        else:
+            return 'Error: name must end with `_pipe`.'
