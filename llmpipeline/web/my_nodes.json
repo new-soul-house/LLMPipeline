@@ -1,0 +1,371 @@
+{
+    "InputText": {
+        "input": {
+            "required": {
+                "input": [
+                    "STRING",
+                    {
+                        "default": null,
+                        "tooltip": "The name of the checkpoint (model) to load."
+                    }
+                ]
+            }
+        },
+        "input_order": {
+            "required": [
+                "input"
+            ]
+        },
+        "output": [
+            "TEXT"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "TEXT"
+        ],
+        "name": "InputText",
+        "display_name": "文本输入",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "输入",
+        "output_node": false,
+        "output_tooltips": []
+    },
+    "PreviewText": {
+        "input": {
+            "required": {
+                "text": [
+                    "STRING",
+                    {
+                        "default": null
+                    }
+                ]
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO"
+            }
+        },
+        "input_order": {
+            "required": [
+                "text"
+            ],
+            "hidden": [
+                "prompt",
+                "extra_pnginfo"
+            ]
+        },
+        "output": [],
+        "output_is_list": [],
+        "output_name": [],
+        "name": "PreviewText",
+        "display_name": "文本输出",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "输出",
+        "output_node": true
+    },
+    "prompt": {
+        "input": {
+            "required": {
+                "text": [
+                    "TEXT",
+                    {
+                        "tooltip": "The name of the checkpoint (model) to load."
+                    }
+                ],
+                "model": ["MODEL"],
+                "prompt": [
+                    "STRING",
+                    {
+                        "multiline": true,
+                        "dynamicPrompts": true,
+                        "tooltip": "The name of the checkpoint (model) to load."
+                    }
+                ]
+            }
+        },
+        "input_order": {
+            "required": [
+                "text",
+                "model",
+                "prompt"
+            ]
+        },
+        "output": [
+            "TEXT"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "TEXT"
+        ],
+        "name": "prompt",
+        "display_name": "提示词",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "提示词",
+        "output_node": false,
+        "output_tooltips": []
+    },
+    "diag_prompt": {
+        "input": {
+            "required": {
+                "患者信息": [
+                    "TEXT",
+                    {
+                        "tooltip": "The name of the checkpoint (model) to load."
+                    }
+                ],
+                "模型": [
+                    "MODEL",
+                    {
+                        "tooltip": "The model used for denoising the input latent."
+                    }
+                ],
+                "prompt": [
+                    "STRING",
+                    {
+                        "default": "【角色】你是一名无所不能无所不知的医生。\n【任务】请你根据【患者信息】，回答患者诊断的疾病是什么，结果参照示例返回JSON格式。\n\n【示例】\n【患者信息】患者男，年龄21.67岁，民族汉族，诊断为腹泻，从2004-09-10使用药品盐酸左氧氟沙星注射液，日用量为.2克，1日2次，给药途径是静脉滴注，用药原因是感染。\n【回答】\n```json\n{\n    \"disease\": \"腹泻\"\n}\n```\n\n下面请你认真作答：\n【患者信息】{患者信息}\n【回答】\n",
+                        "multiline": true,
+                        "dynamicPrompts": true,
+                        "tooltip": "The name of the checkpoint (model) to load."
+                    }
+                ]
+            }
+        },
+        "input_order": {
+            "required": [
+                "患者信息",
+                "模型"
+            ]
+        },
+        "output": [
+            "TEXT"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "疾病"
+        ],
+        "name": "diag_prompt",
+        "display_name": "提取疾病",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "提示词/ADR",
+        "output_node": false,
+        "output_tooltips": []
+    },
+    "rag_search": {
+        "input": {
+            "required": {
+                "text": [
+                    "TEXT",
+                    {
+                        "tooltip": "The name of the checkpoint (model) to load."
+                    }
+                ],
+                "kb": [
+                    "STRING",
+                    {
+                        "default": null,
+                        "multiline": false,
+                        "dynamicPrompts": true,
+                        "tooltip": "The name of the checkpoint (model) to load."
+                    }
+                ],
+                "top_k": [
+                    "INT",
+                    {
+                        "default": 1,
+                        "min": 1
+                    }
+                ],
+                "threshold": [
+                    "FLOAT",
+                    {
+                        "default": 0.5,
+                        "min": 0.01,
+                        "max": 1.0,
+                        "step": 0.1
+                    }
+                ]
+            }
+        },
+        "input_order": {
+            "required": [
+                "text",
+                "kb",
+                "top_k",
+                "threshold"
+            ]
+        },
+        "output": [
+            "TEXT"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "results"
+        ],
+        "name": "rag_search",
+        "display_name": "检索知识库",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "知识库",
+        "output_node": false,
+        "output_tooltips": []
+    },
+    "disposal_suggestions_prompt": {
+        "input": {
+            "required": {
+                "患者信息": [
+                    "TEXT"
+                ],
+                "临床路径": [
+                    "TEXT"
+                ],
+                "分析规则": [
+                    "TEXT"
+                ],
+                "模型": [
+                    "MODEL",
+                    {
+                        "tooltip": "The model used for denoising the input latent."
+                    }
+                ],
+                "prompt": [
+                    "STRING",
+                    {
+                        "default": "【角色】你是一名无所不能无所不知的医生。\n【任务】请你根据【患者信息】，参考【临床路径】和【新增分析规则】，对患者当前病 情数据做对应分析，并给出每种情况的处置建议。【新增分析规则】的优先级高于【临床路径】，忽略诊断那一项，结果参照示例返回JSON格式。\n\n【示例一】\n【患者信息】李女士，35岁，初步诊断为子宫内膜异位症，最新一次血常规结果为白细胞计数12.0 x10^9/L，C-反应蛋白50mg/L，患者B超提示卵巢巧克力囊肿。\n【临床路径】子宫内膜异位症临床路径\n（一）适用对象 ...\n【新增分析规则】None\n【回答 】\n```json\n{\n    \"items\": [\n        {\n            \"disease_description\": \"卵巢巧克力囊肿\",\n            \"patient_data\": \"卵巢巧克力囊肿\",\n            \"ref_rule\": null,\n            \"disposition_recommendation\": \"观察等待、药物治疗、手术治疗和术后管理，具体方案需根据患者病情和医生建议确定。\",\n            \"clinical_path_variation\": true\n        }\n    ]\n}\n```\n\n【示例二】\n【患者信息】李女士，35岁，初步诊断为子宫内膜异位症，最新一次血常规结果为白细胞计数12.0 x10^9/L，C-反应蛋白50mg/L，患者B超提示卵巢巧克力囊肿。\n【临床路径】子宫内膜异位症临床路径\n（一）适用对象 ...\n【新增分析规则】1.（白细胞计数>10.0 x10^9/L），提示患者可能存在感染，需要进一步排查感染来源。建议进行血培养和尿培养。\n2.（CRP≥40mg/L），提示患者存在炎症反应， 可能需要进行抗炎治疗。\n【回答】\n```json\n{\n    \"items\": [\n        {\n            \"disease_description\": \"感染\",\n            \"patient_data\": \"白细胞计数12.0 x10^9/L\",\n            \"ref_rule\": \"（白细胞计数>10.0 x10^9/L），提示患者可能存在感染，需要进一步排查感染来源。建议进行血培养和尿培养。\",\n            \"disposition_recommendation\": \"进行血培养和尿培养，排查感染 来源。\",\n            \"clinical_path_variation\": true\n        },\n        {\n            \"disease_description\": \"炎症反应\",\n            \"patient_data\": \"C-反应蛋白50mg/L\",\n            \"ref_rule\": \"（CRP≥40mg/L），提示患者存在炎症反应，可能需要进行抗炎治疗。\",\n            \"disposition_recommendation\": \"进行抗炎治疗。\",\n            \"clinical_path_variation\": true\n        },\n        {\n            \"disease_description\": \"卵巢巧克力囊肿\",\n            \"patient_data\": \"卵巢巧克力囊肿\",\n            \"ref_rule\": null,\n            \"disposition_recommendation\": \"观察等待、药物治疗、手术治疗和术后管理，具体方案需根据患者病情和医生建议确定。\",\n            \"clinical_path_variation\": true\n        }\n    ]\n}\n```\n\n下面请你认真作答：\n 【患者信息】{患者信息}\n【临床路径】{临床路径}\n【新增分析规则】{分析规则}\n【回答】\n"
+                    }
+                ]
+            }
+        },
+        "input_order": {
+            "required": [
+                "患者信息",
+                "临床路径",
+                "分析规则",
+                "模型"
+            ]
+        },
+        "output": [
+            "STRING:PROMPT"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "处置建议"
+        ],
+        "name": "disposal_suggestions_prompt",
+        "display_name": "提取疾病",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "提示词/ADR",
+        "output_node": false,
+        "output_tooltips": []
+    },
+    "LLM": {
+        "input": {
+            "required": {
+                "model_name": [
+                    [
+                        "v1-5-pruned.safetensors",
+                        "chatgpt-4o",
+                        "pulse"
+                    ],
+                    {
+                        "tooltip": "The name of the model to use."
+                    }
+                ]
+            }
+        },
+        "input_order": {
+            "required": [
+                "model_name"
+            ]
+        },
+        "output": [
+            "MODEL"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "MODEL"
+        ],
+        "name": "LLM",
+        "display_name": "模型",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "模型",
+        "output_node": false,
+        "output_tooltips": []
+    },
+    "PreviewTextNode": {
+        "input": {
+            "required": {
+                "text": [
+                    "STRING",
+                    {
+                        "forceInput": true
+                    }
+                ]
+            }
+        },
+        "output": [
+            "STRING"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "STRING"
+        ],
+        "name": "PreviewTextNode",
+        "display_name": "Preview Text Node",
+        "description": "The node displays the input text.",
+        "python_module": "custom_nodes.ComfyUI_Custom_Nodes_AlekPet",
+        "category": "AlekPet Nodes",
+        "output_node": true
+    },
+    "test": {
+        "input": {
+            "required": {
+                "prompt": [
+                    "STRING",
+                    {
+                        "default": "【角色】你是一名无所不能无所不知的医生。\n【任务】请你根据【患者信息】，参考【临床路径】和【新增分析规则】，对患者当前病 情数据做对应分析，并给出每种情况的处置建议。【新增分析规则】的优先级高于【临床路径】，忽略诊断那一项，结果参照示例返回JSON格式。\n\n【示例一】\n【患者信息】李女士，35岁，初步诊断为子宫内膜异位症，最新一次血常规结果为白细胞计数12.0 x10^9/L，C-反应蛋白50mg/L，患者B超提示卵巢巧克力囊肿。\n【临床路径】子宫内膜异位症临床路径\n（一）适用对象 ...\n【新增分析规则】None\n【回答 】\n```json\n{\n    \"items\": [\n        {\n            \"disease_description\": \"卵巢巧克力囊肿\",\n            \"patient_data\": \"卵巢巧克力囊肿\",\n            \"ref_rule\": null,\n            \"disposition_recommendation\": \"观察等待、药物治疗、手术治疗和术后管理，具体方案需根据患者病情和医生建议确定。\",\n            \"clinical_path_variation\": true\n        }\n    ]\n}\n```\n\n【示例二】\n【患者信息】李女士，35岁，初步诊断为子宫内膜异位症，最新一次血常规结果为白细胞计数12.0 x10^9/L，C-反应蛋白50mg/L，患者B超提示卵巢巧克力囊肿。\n【临床路径】子宫内膜异位症临床路径\n（一）适用对象 ...\n【新增分析规则】1.（白细胞计数>10.0 x10^9/L），提示患者可能存在感染，需要进一步排查感染来源。建议进行血培养和尿培养。\n2.（CRP≥40mg/L），提示患者存在炎症反应， 可能需要进行抗炎治疗。\n【回答】\n```json\n{\n    \"items\": [\n        {\n            \"disease_description\": \"感染\",\n            \"patient_data\": \"白细胞计数12.0 x10^9/L\",\n            \"ref_rule\": \"（白细胞计数>10.0 x10^9/L），提示患者可能存在感染，需要进一步排查感染来源。建议进行血培养和尿培养。\",\n            \"disposition_recommendation\": \"进行血培养和尿培养，排查感染 来源。\",\n            \"clinical_path_variation\": true\n        },\n        {\n            \"disease_description\": \"炎症反应\",\n            \"patient_data\": \"C-反应蛋白50mg/L\",\n            \"ref_rule\": \"（CRP≥40mg/L），提示患者存在炎症反应，可能需要进行抗炎治疗。\",\n            \"disposition_recommendation\": \"进行抗炎治疗。\",\n            \"clinical_path_variation\": true\n        },\n        {\n            \"disease_description\": \"卵巢巧克力囊肿\",\n            \"patient_data\": \"卵巢巧克力囊肿\",\n            \"ref_rule\": null,\n            \"disposition_recommendation\": \"观察等待、药物治疗、手术治疗和术后管理，具体方案需根据患者病情和医生建议确定。\",\n            \"clinical_path_variation\": true\n        }\n    ]\n}\n```\n\n下面请你认真作答：\n 【患者信息】{患者信息}\n【临床路径】{临床路径}\n【新增分析规则】{分析规则}\n【回答】\n"
+                    }
+                ]
+            }
+        },
+        "input_order": {
+            "required": [
+            ]
+        },
+        "output": [
+            "STRING"
+        ],
+        "output_is_list": [
+            false
+        ],
+        "output_name": [
+            "处置建议"
+        ],
+        "name": "test",
+        "display_name": "提取疾病",
+        "description": "Loads a diffusion model checkpoint, diffusion models are used to denoise latents.",
+        "python_module": "nodes",
+        "category": "提示词",
+        "output_node": false,
+        "output_tooltips": []
+    }
+}

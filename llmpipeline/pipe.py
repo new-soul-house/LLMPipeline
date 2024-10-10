@@ -4,7 +4,7 @@ import json
 from .log import log
 
 class LLMPipe:
-    def __init__(self, name, prompt=None, return_json=True, format=None, llm=None, verbose=True, retry=5, inp=None, out=None, run_time=None, lock=None, **kargs):
+    def __init__(self, name, prompt=None, return_json=True, format=None, llm=None, verbose=True, retry=5, inp=None, out=None, run_time=None, lock=None, inout_log=None, **kargs):
         self.name = name
         self.prompt = prompt
         self.llm = llm
@@ -15,6 +15,7 @@ class LLMPipe:
         self.retry = retry
         self.log = lambda n, t: log.debug(f'[{name}] {n}: {t}') if self.verbose else None
         self.lock = lock
+        self.inout_log = inout_log if inout_log is not None else []
 
     @property
     def time(self):
@@ -44,12 +45,20 @@ class LLMPipe:
                 out = resp
 
             t = time.time() - start_t
+            inout = {
+                'id': self.name,
+                'timestamp': time.time(),
+                'input': text,
+                'output': resp,
+            }
             self.log('cost time', t)
             if self.lock is not None:
                 with self.lock:
                     self.run_time.append(t)
+                    self.inout_log.append(inout)
             else:
                 self.run_time.append(t)
+                self.inout_log.append(inout)
             if out is None:
                 n += 1
                 self.log('retry', n)
@@ -71,13 +80,15 @@ class LLMPipe:
         return None
 
 class RAGPipe:
-    def __init__(self, name, rag=None, verbose=True, return_key=None, run_time=None, lock=None, **kargs):
+    def __init__(self, name, rag=None, verbose=True, return_key=None, run_time=None, lock=None, inout_log=None, **kargs):
+        self.name = name
         self.rag = rag
         self.run_time = run_time if run_time is not None else []
         self.verbose = verbose
         self.return_key = return_key
         self.log = lambda n, t: log.debug(f'[{name}] {n}: {t}') if self.verbose else None
         self.lock = lock
+        self.inout_log = inout_log if inout_log is not None else []
 
     @property
     def time(self):
@@ -89,11 +100,18 @@ class RAGPipe:
         start_t = time.time()
         out = []
         if type(inp) is list:
+            inout = []
             for i in inp:
                 self.log('inp', i)
                 o = self.rag(i)
                 self.log('out', o)
                 if o is not None and len(o): out.append(o)
+                inout.append({
+                    'id': self.name,
+                    'timestamp': time.time(),
+                    'input': i,
+                    'output': o,
+                })
         else:
             self.log('inp', inp)
             o = self.rag(inp)
@@ -105,12 +123,20 @@ class RAGPipe:
                     out = o
                 else:
                     out.append(o)
+            inout = [{
+                'id': self.name,
+                'timestamp': time.time(),
+                'input': inp,
+                'output': o,
+            }]
 
         t = time.time() - start_t
         self.log('cost time', t)
         if self.lock is not None:
             with self.lock:
                 self.run_time.append(t)
+                self.inout_log.extend(inout)
         else:
             self.run_time.append(t)
+            self.inout_log.extend(inout)
         return out

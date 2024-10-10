@@ -62,11 +62,14 @@ class Prompt:
 
 
 class PromptManager:
-    def __init__(self, prompts_dir):
+    def __init__(self, prompts_dir=None):
         log.debug('Setup PromptManager')
-        self.prompts_dir = Path(prompts_dir)
-        self.prompts = {}
-        self.load_prompts()
+        if prompts_dir is None:
+            log.debug('PromptManager dir is None')
+        else:
+            self.prompts_dir = Path(prompts_dir)
+            self.prompts = {}
+            self.load_prompts()
 
     def load_prompts(self):
         self.prompts = {}

@@ -20,10 +20,11 @@ class State(Enum):
     DONE = 1
 
 class LLMPipeline:
-    def __init__(self, pipe, llm_backend, rag_backend):
+    def __init__(self, pipe, llm_backend, rag_backend, name=None):
         self.pipe = pipe
         self.llm_backend = llm_backend
         self.rag_backend = rag_backend
+        self.name = name
         self.start_entry = None
         self._check_pipe()
         self._init()
@@ -78,7 +79,7 @@ class LLMPipeline:
                         del pipe[e]['llm_backend']
                     else:
                         llm_backend = self.llm_backend
-                    pipe_manager[e] = LLMPipe(e, run_time=self.manager.list(), llm=llm_backend, lock=self.lock, **pipe[e])
+                    pipe_manager[e] = LLMPipe(e, run_time=self.manager.list(), inout_log=self.manager.list(), llm=llm_backend, lock=self.lock, **pipe[e])
                 case 'rag':
                     if 'rag_param' in pipe[e]:
                         param = dict(pipe[e]['rag_param'])
@@ -89,15 +90,15 @@ class LLMPipeline:
                         del pipe[e]['rag_backend']
                     else:
                         rag_backend = self.rag_backend
-                    pipe_manager[e] = RAGPipe(e, run_time=self.manager.list(), rag=rag_backend, lock=self.lock, **pipe[e])
+                    pipe_manager[e] = RAGPipe(e, run_time=self.manager.list(), inout_log=self.manager.list(), rag=rag_backend, lock=self.lock, **pipe[e])
         self.pipe_manager = pipe_manager
-        log.debug(f'Pipe manager initialization successful')
-        
+        log.debug(f"'{self.name}' Pipe manager initialization successful")
+
         if self.start_entry is None: self._find_start_entry()
         if self.start_entry is None:
             log.error(f"Can't find start entry in pipes.")
             exit()
-        log.debug(f'Start entry: {self.start_entry}')
+        log.debug(f"'{self.name}' Start entry: {self.start_entry}")
 
     def _find_start_entry(self):
         pipe = self.pipe
@@ -272,6 +273,7 @@ class LLMPipeline:
                 try:
                     entry, pipes = task_queue.get_nowait()
                     # log.debug(f'{name}, get entry: {entry}')
+                    # time.sleep(5)
                     if entry == 'exit':
                         # if task_queue.qsize() == 0:
                         task_queue.put((entry, pipes))
@@ -280,6 +282,7 @@ class LLMPipeline:
                         # else: continue
                 except queue.Empty:
                     # log.debug(f'{name}, queue empty, wait new task ...')
+                    # time.sleep(5)
                     # break
                     continue
 
@@ -303,17 +306,17 @@ class LLMPipeline:
                                 with lock:
                                     if type(o) is str:
                                         pre = data[entry]
-                                        pre[o] = [None] * n
+                                        pre[o] = [State.WAIT] * n
                                         data[entry] = pre
                                     elif type(o) is list:
                                         for j in o:
                                             pre = data[entry]
-                                            pre[j] = [None] * n
+                                            pre[j] = [State.WAIT] * n
                                             data[entry] = pre
                                     elif type(o) is dict:
                                         for j in o.values():
                                             pre = data[entry]
-                                            pre[j] = [None] * n
+                                            pre[j] = [State.WAIT] * n
                                             data[entry] = pre
 
                                 task_queue.put((nt, nps))
@@ -330,7 +333,7 @@ class LLMPipeline:
                     case 'loop_end':
                         has_done = []
                         for v in data[param['loop']].values():
-                            has_done.append(all([i is not None for i in v]))
+                            has_done.append(all([i is not State.WAIT for i in v]))
 
                         if all(has_done):
                             loop_data = data[param['loop']]
@@ -351,10 +354,10 @@ class LLMPipeline:
                     has_inp = []
                     for i in param['inp']:
                         if type(i) is str:
-                            has_inp.append(i in data or (i in data[param['loop']] and data[param['loop']][i][param['loop_index']] is not None))
+                            has_inp.append(i in data or (i in data[param['loop']] and data[param['loop']][i][param['loop_index']] is not State.WAIT))
                         elif type(i) is dict:
                             for j in i.values():
-                                has_inp.append(j in data or (j in data[param['loop']] and data[param['loop']][j][param['loop_index']] is not None))
+                                has_inp.append(j in data or (j in data[param['loop']] and data[param['loop']][j][param['loop_index']] is not State.WAIT))
 
                     if all(has_inp):
                         inps = []
@@ -492,7 +495,10 @@ class LLMPipeline:
             md_file = f'logs/{fname}_report.md'
             with open(md_file, 'w') as f: f.write(md_content)
 
-        log.debug(f'pipe detail:\n{ json.dumps(info, indent=4, ensure_ascii=False)}')
+        log.debug(f'pipe detail:\n{json.dumps(info, indent=4, ensure_ascii=False)}')
+        info['logs'] = []
+        for k in pipe_manager:
+            info['logs'] += pipe_manager[k].inout_log
 
         # breakpoint()
         return r, info
@@ -500,12 +506,15 @@ class LLMPipeline:
 class PipelineManager:
     def __init__(self, pipes_dir, prompt_manager, llm_client=None, rag_client=None):
         log.debug('Setup PipelineManager')
-        self.pipes_dir = Path(pipes_dir)
-        self.prompt_manager = prompt_manager
-        self.llm_client = llm_client
-        self.rag_client = rag_client
-        self.pipes = {}
-        self.load_pipes()
+        if pipes_dir is None:
+            log.debug('PipelineManager dir is None')
+        else:
+            self.pipes_dir = Path(pipes_dir)
+            self.prompt_manager = prompt_manager
+            self.llm_client = llm_client
+            self.rag_client = rag_client
+            self.pipes = {}
+            self.load_pipes()
 
     def load_pipes(self):
         self.pipes = {}
@@ -516,14 +525,15 @@ class PipelineManager:
         for pf in pipe_files:
             m = importlib.import_module(f'{str(self.pipes_dir).replace("/",".")}.{pf.stem}')
             conf = copy.deepcopy(m.pipe)
-            for k in m.pipe:
-                if 'prompt' in m.pipe[k]:
-                    m.pipe[k]['prompt'] = self.prompt_manager.prompts[m.pipe[k]['prompt']]
+            pipe = copy.deepcopy(m.pipe)
+            for k in pipe:
+                if 'prompt' in pipe[k]:
+                    pipe[k]['prompt'] = self.prompt_manager.prompts[pipe[k]['prompt']]
 
             self.pipes[pf.stem] = {
                 'file': pf,
                 'conf': conf,
-                'func': LLMPipeline(m.pipe, self.llm_client, self.rag_client)
+                'func': LLMPipeline(pipe, self.llm_client, self.rag_client, pf.stem)
             }
 
         log.debug('All pipelines loaded')
