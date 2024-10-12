@@ -4,17 +4,19 @@ import json
 from .log import log
 
 class LLMPipe:
-    def __init__(self, name, prompt=None, return_json=True, format=None, llm=None, verbose=True, retry=5, inp=None, out=None, run_time=None, lock=None, inout_log=None, **kargs):
+    def __init__(self, name, prompt=None, return_json=True, format=None, llm=None, verbose=True, retry=5, inp=None, out=None, lock=None, run_time=None, inout_log=None, **kargs):
         self.name = name
         self.prompt = prompt
         self.llm = llm
         self.return_json = return_json
         self.format = format
-        self.run_time = run_time if run_time is not None else []
         self.verbose = verbose
         self.retry = retry
         self.log = lambda n, t: log.debug(f'[{name}] {n}: {t}') if self.verbose else None
+
+        # multiprocess lock
         self.lock = lock
+        self.run_time = run_time if run_time is not None else []
         self.inout_log = inout_log if inout_log is not None else []
 
     @property
@@ -80,14 +82,16 @@ class LLMPipe:
         return None
 
 class RAGPipe:
-    def __init__(self, name, rag=None, verbose=True, return_key=None, run_time=None, lock=None, inout_log=None, **kargs):
+    def __init__(self, name, rag=None, verbose=True, return_key=None, lock=None, run_time=None, inout_log=None, **kargs):
         self.name = name
         self.rag = rag
-        self.run_time = run_time if run_time is not None else []
         self.verbose = verbose
         self.return_key = return_key
         self.log = lambda n, t: log.debug(f'[{name}] {n}: {t}') if self.verbose else None
+
+        # multiprocess lock
         self.lock = lock
+        self.run_time = run_time if run_time is not None else []
         self.inout_log = inout_log if inout_log is not None else []
 
     @property
@@ -100,6 +104,7 @@ class RAGPipe:
         start_t = time.time()
         out = []
         if type(inp) is list:
+            self.log('get list:', inp)
             inout = []
             for i in inp:
                 self.log('inp', i)

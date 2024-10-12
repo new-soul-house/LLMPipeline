@@ -21,3 +21,10 @@ log_file = log_dir / f"{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 logging.Formatter.converter = beijing
 logging.basicConfig(level="NOTSET", format=LOGFORMAT, datefmt="[%y-%m-%d %H:%M:%S]", handlers=[rh, RotatingFileHandler(log_file, maxBytes=MAXBYTES)])
 log = logging.getLogger("llmpipeline")
+
+def _banner_print(text):
+    n = len(text)
+    t = '\n' + '-'*(4+n) + '\n| ' + text + ' |\n' + '-'*(4+n)
+    log.debug(t)
+
+log.banner = _banner_print

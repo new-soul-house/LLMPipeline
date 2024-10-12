@@ -4,6 +4,7 @@ import time
 import json
 import copy
 import queue
+import asyncio
 import datetime
 import importlib
 import traceback
@@ -20,12 +21,14 @@ class State(Enum):
     DONE = 1
 
 class LLMPipeline:
-    def __init__(self, pipe, llm_backend, rag_backend, name=None):
+    def __init__(self, pipe, llm_backend, rag_backend, name=None, is_async=False):
         self.pipe = pipe
         self.llm_backend = llm_backend
         self.rag_backend = rag_backend
         self.name = name
+        self.is_async = is_async
         self.start_entry = None
+        self.pipe_manager = None
         self._check_pipe()
         self._init()
 
@@ -177,7 +180,7 @@ class LLMPipeline:
             e = items.pop(0)
             if e == 'exit': continue
             if pipe[e]['mode'] == 'loop':
-                inp = pipe[e]['inp']
+                inp = pipe[e]['inp'][0]
                 links.add(f'{inp} ==> {e}')
                 loop_inps = set()
                 loop_outs = set()
@@ -239,8 +242,11 @@ class LLMPipeline:
         data = collections.defaultdict(list)
         loop_end = {}
         for name, e, start_time, end_time in perf:
-            arr = name.split(': ')
-            n = f'{arr[0]}_{int(arr[1]):0>2d}'
+            if 'pid' in name:
+                arr = name.split(': ')
+                n = f'{arr[0]}_{int(arr[1]):0>2d}'
+            else:
+                n = name
             s = (start_time - base_time) * 1000
             Δ = (end_time - start_time) * 1000
             if e in pipe:
@@ -262,6 +268,51 @@ class LLMPipeline:
                     mermaid += f'{e}: {s:.0f}, {Δ:.0f}ms\n'
 
         return mermaid
+
+    def gen_info(self, data, perf, start_t, save_pref=False):
+        pipe_manager = self.pipe_manager
+
+        info = {
+            'perf': perf,
+            'detail': {},
+            'total_time': time.time()-start_t,
+            'mermaid': {},
+        }
+        for k in sorted(pipe_manager, key=lambda k: pipe_manager[k].time or -1):
+            info['detail'][k] = {
+                # 'run_time': list(pipe_manager[k].run_time),
+                'avg_time': pipe_manager[k].time,
+            }
+
+        if save_pref and 'error_msg' not in data:
+            info['mermaid']['pipe'] = self.pipe2mermaid(self.pipe, info)
+            info['mermaid']['perf'] = self.perf2mermaid(perf, self.pipe)
+            fname = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+            if check_cmd_exist('mmdc'):
+                pipe_img = f'logs/{fname}_pipe.png'
+                os.popen(f'echo "{info["mermaid"]["pipe"]}" | mmdc -o {pipe_img}')
+                log.debug(f'save {pipe_img}')
+                perf_img = f"logs/{fname}_perf.png"
+                os.popen(f'echo "{info["mermaid"]["perf"]}" | mmdc -o {perf_img}')
+                log.debug(f'save {perf_img}')
+                md_pipe = f"![pipe_img]({pipe_img.split('/')[1]})"
+                md_perf = f"![perf_img]({perf_img.split('/')[1]})"
+            else:
+                log.warning('Please install mmdc to generate mermaid images.')
+                md_pipe = f"```mermaid\n{info['mermaid']['pipe']}```"
+                md_perf = f"```mermaid\n{info['mermaid']['perf']}```"
+
+            r_str = f'```json\n{json.dumps(data, indent=4, ensure_ascii=False)}\n```'
+            md_content = f'## result\n{r_str}\n## Pipeline\n{md_pipe}\n## Perfermence\n{md_perf}'
+            md_file = f'logs/{fname}_report.md'
+            with open(md_file, 'w') as f: f.write(md_content)
+
+        log.debug(f'pipe detail:\n{json.dumps(info, indent=4, ensure_ascii=False)}')
+        info['logs'] = []
+        for k in pipe_manager:
+            info['logs'] += pipe_manager[k].inout_log
+        
+        return info
 
     def task_process(self, pid, task_queue, perf_queue, pipe_manager, data, lock):
         name = f'pid: {pid}'
@@ -293,10 +344,11 @@ class LLMPipeline:
                     case 'rag':
                         pipe = pipe_manager[entry]
                     case 'loop':
-                        with lock: data[entry] = {param['inp']: data[param['inp']]}
-                        n = len(data[param['inp']])
+                        loop_item = param['inp'][0]
+                        with lock: data[entry] = {loop_item: data[loop_item]}
+                        n = len(data[loop_item])
 
-                        for i, item in enumerate(data[param['inp']]):
+                        for i, item in enumerate(data[loop_item]):
                             nps = copy.deepcopy(pipes)
 
                             for nt in param['pipe_in_loop']:
@@ -437,7 +489,7 @@ class LLMPipeline:
             task_queue.put(('exit', {}))
             log.debug(f'{name}, exit')
 
-    def run(self, data, core_num=4, save_pref=False):
+    def mp_run(self, data, core_num=4, save_pref=False):
         pipe = copy.deepcopy(self.pipe)
         pipe_manager, lock = self.pipe_manager, self.lock
         start_t = time.time()
@@ -460,48 +512,179 @@ class LLMPipeline:
         perf = []
         while not perf_queue.empty(): perf.append(perf_queue.get())
 
-        info = {
-            'perf': perf,
-            'detail': {},
-            'total_time': time.time()-start_t,
-            'mermaid': {},
-        }
-        for k in sorted(pipe_manager, key=lambda k: pipe_manager[k].time or -1):
-            info['detail'][k] = {
-                # 'run_time': list(pipe_manager[k].run_time),
-                'avg_time': pipe_manager[k].time,
-            }
+        info = self.gen_info(r, perf, start_t, save_pref)
 
-        if save_pref and 'error_msg' not in r:
-            info['mermaid']['pipe'] = self.pipe2mermaid(pipe, info)
-            info['mermaid']['perf'] = self.perf2mermaid(perf, pipe)
-            fname = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-            if check_cmd_exist('mmdc'):
-                pipe_img = f'logs/{fname}_pipe.png'
-                os.popen(f'echo "{info["mermaid"]["pipe"]}" | mmdc -o {pipe_img}')
-                log.debug(f'save {pipe_img}')
-                perf_img = f"logs/{fname}_perf.png"
-                os.popen(f'echo "{info["mermaid"]["perf"]}" | mmdc -o {perf_img}')
-                log.debug(f'save {perf_img}')
-                md_pipe = f"![pipe_img]({pipe_img.split('/')[1]})"
-                md_perf = f"![perf_img]({perf_img.split('/')[1]})"
-            else:
-                log.warning('Please install mmdc to generate mermaid images.')
-                md_pipe = f"```mermaid\n{info['mermaid']['pipe']}```"
-                md_perf = f"```mermaid\n{info['mermaid']['perf']}```"
-
-            r_str = f'```json\n{json.dumps(r, indent=4, ensure_ascii=False)}\n```'
-            md_content = f'## result\n{r_str}\n## Pipeline\n{md_pipe}\n## Perfermence\n{md_perf}'
-            md_file = f'logs/{fname}_report.md'
-            with open(md_file, 'w') as f: f.write(md_content)
-
-        log.debug(f'pipe detail:\n{json.dumps(info, indent=4, ensure_ascii=False)}')
-        info['logs'] = []
-        for k in pipe_manager:
-            info['logs'] += pipe_manager[k].inout_log
-
-        # breakpoint()
         return r, info
+
+    async def async_task(self, pipe_name, queue, result, perf):
+        start_time = time.time()
+        log.banner(f"Enter async task: {pipe_name}")
+        pipe = self.pipe[pipe_name]
+
+        if 'pipe_in_loop' in pipe:
+            loop_item = pipe['inp'][0]
+            d = await queue[loop_item].get()
+            queue[loop_item].put_nowait(d)
+            n = len(d)
+
+            loop_out_items = []
+            for pn in pipe['pipe_in_loop']:
+                o = self.pipe[pn]['out']
+
+                if type(o) is str:
+                    loop_out_items.append(o)
+                elif type(o) is list:
+                    loop_out_items += o
+                elif type(o) is dict:
+                    for k in o:
+                        loop_out_items.append(o[k])
+
+            for item in [loop_item]+loop_out_items:
+                for i in range(n):
+                    t = f'#{pipe_name}#_{i}_[{item}]'
+                    queue[t] = asyncio.Queue()
+                    if item == loop_item: queue[t].put_nowait(d[i])
+
+            tasks = []
+            for pn in pipe['pipe_in_loop']:
+                for i in range(n):
+                    new_name = f'{pipe_name} -> {pn} ({i})'
+                    new_pipe = copy.copy(self.pipe[pn])
+
+                    new_inps = []
+                    for inp in new_pipe['inp']:
+                        if type(inp) is str:
+                            if inp == loop_item or inp in loop_out_items:
+                                new_inps.append(f'#{pipe_name}#_{i}_[{inp}]')
+                            else:
+                                new_inps.append(inp)
+                        elif type(inp) is dict:
+                            t = {}
+                            for k, v in inp.items():
+                                if v == loop_item or v in loop_out_items:
+                                    t[k] = f'#{pipe_name}#_{i}_[{v}]'
+                                else: t[k] = v
+                            new_inps.append(t)
+                    new_pipe['inp'] = new_inps
+
+                    o = new_pipe['out']
+                    if type(o) is str:
+                        new_pipe['out'] = f'#{pipe_name}#_{i}_[{o}]'
+                    elif type(o) is list:
+                        new_pipe['out'] = [f'#{pipe_name}#_{i}_[{item}]' for item in o]
+                    elif type(o) is dict:
+                        new_pipe['out'] = {k:f'#{pipe_name}#_{i}_[{o[k]}]' for k in o}
+
+                    self.pipe[new_name] = new_pipe
+
+                    task = asyncio.create_task(self.async_task(new_name, queue, result, perf))
+                    tasks.append(task)
+            await asyncio.gather(*tasks)
+
+            # Delete intermediate process data
+            for pn in pipe['pipe_in_loop']:
+                for i in range(n):
+                    new_name = f'{pipe_name} -> {pn} ({i})'
+                    del self.pipe[new_name]
+
+            for item in [loop_item]+loop_out_items:
+                d = []
+                for i in range(n):
+                    t = f'#{pipe_name}#_{i}_[{item}]'
+                    del queue[t]
+                    if t in result:
+                        d.append(result[t])
+                        del result[t]
+
+                if item not in result:
+                    result[item] = d
+                    queue[item] = asyncio.Queue()
+                    queue[item].put_nowait(d)
+        else:
+            inps = []
+            for i in pipe['inp']:
+                if type(i) is str:
+                    d = await queue[i].get()
+                    inps.append(d)
+                    queue[i].put_nowait(d)
+                elif type(i) is dict:
+                    t = {}
+                    for k, v in i.items():
+                        d = await queue[v].get()
+                        t[k] = d
+                        queue[v].put_nowait(d)
+                    inps.append(t)
+
+            if pipe_name in self.pipe_manager:
+                out = self.pipe_manager[pipe_name](*inps)
+            else:
+                t = pipe_name.split('-> ')[1].split(' (')[0]
+                out = self.pipe_manager[t](*inps)
+
+            o = pipe['out']
+            if type(o) is str:
+                result[o] = out
+                if o not in queue: queue[o] = asyncio.Queue()
+                queue[o].put_nowait(out)
+            elif type(o) is list:
+                for k in o:
+                    k_ = k
+                    if k[0] == '#' and k[-1] == ']':
+                        k_ = k.split('_[')[1][:-1]
+                    result[k] = out[k_]
+                    if k not in queue: queue[k] = asyncio.Queue()
+                    queue[k].put_nowait(out[k_])
+            elif type(o) is dict:
+                for k in o:
+                    result[o[k]] = out[k]
+                    if o[k] not in queue: queue[o[k]] = asyncio.Queue()
+                    queue[o[k]].put_nowait(out[k])
+
+        log.banner(f"Leave async task: {pipe_name}")
+
+        if '-> ' in pipe_name and pipe_name[-1] == ')':
+            pipe_name = pipe_name.split('-> ')[1].split(' (')[0]
+        perf.append(('coroutine', pipe_name, start_time, time.time()))
+
+    async def async_run(self, data, save_pref=False):
+        start_t = time.time()
+        # find outloop pipes
+        inloop_pipes = set()
+        for pipe_name in self.pipe:
+            if 'pipe_in_loop' in self.pipe[pipe_name]:
+                inloop_pipes |= set(self.pipe[pipe_name]['pipe_in_loop'])
+        outloop_pipes = set(self.pipe.keys()) - inloop_pipes
+
+        # init queue
+        asyncio_queue = {}
+        for pipe_name in outloop_pipes:
+            for i in self.pipe[pipe_name]['inp']:
+                if type(i) is str:
+                    asyncio_queue[i] = asyncio.Queue()
+                elif type(i) is dict:
+                    for v in i.values():
+                        asyncio_queue[v] = asyncio.Queue()
+        # put data into queue
+        for k, v in data.items(): asyncio_queue[k].put_nowait(v)
+
+        perf = []
+        tasks = []
+        for pipe_name in outloop_pipes:
+            task = asyncio.create_task(self.async_task(pipe_name, asyncio_queue, data, perf))
+            tasks.append(task)
+        await asyncio.gather(*tasks)
+
+        info = self.gen_info(data, perf, start_t, save_pref)
+        return data, info
+
+    @property
+    def run(self):
+        if self.is_async:
+            log.debug(f"Run '{self.name}' pipeline in coroutine")
+            return self.async_run
+        else:
+            log.debug(f"Run '{self.name}' pipeline in multiprocess")
+            return self.mp_run
 
 class PipelineManager:
     def __init__(self, pipes_dir, prompt_manager, llm_client=None, rag_client=None):
