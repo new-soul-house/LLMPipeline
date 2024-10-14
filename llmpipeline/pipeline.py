@@ -520,6 +520,7 @@ class LLMPipeline:
         start_time = time.time()
         log.banner(f"Enter async task: {pipe_name}")
         pipe = self.pipe[pipe_name]
+        p_name = pipe_name
 
         if 'pipe_in_loop' in pipe:
             loop_item = pipe['inp'][0]
@@ -615,11 +616,10 @@ class LLMPipeline:
                         queue[v].put_nowait(d)
                     inps.append(t)
 
-            if pipe_name in self.pipe_manager:
-                out = self.pipe_manager[pipe_name](*inps)
-            else:
-                t = pipe_name.split('-> ')[1].split(' (')[0]
-                out = self.pipe_manager[t](*inps)
+            if '-> ' in pipe_name and pipe_name[-1] == ')':
+                p_name = pipe_name.split('-> ')[1].split(' (')[0]
+
+            out = await self.pipe_manager[p_name].async_call(*inps)
 
             o = pipe['out']
             if type(o) is str:
@@ -641,10 +641,7 @@ class LLMPipeline:
                     queue[o[k]].put_nowait(out[k])
 
         log.banner(f"Leave async task: {pipe_name}")
-
-        if '-> ' in pipe_name and pipe_name[-1] == ')':
-            pipe_name = pipe_name.split('-> ')[1].split(' (')[0]
-        perf.append(('coroutine', pipe_name, start_time, time.time()))
+        perf.append(('coroutine', p_name, start_time, time.time()))
 
     async def async_run(self, data, save_pref=False):
         start_t = time.time()
@@ -687,7 +684,7 @@ class LLMPipeline:
             return self.mp_run
 
 class PipelineManager:
-    def __init__(self, pipes_dir, prompt_manager, llm_client=None, rag_client=None):
+    def __init__(self, pipes_dir, prompt_manager, llm_client=None, rag_client=None, is_async=False):
         log.debug('Setup PipelineManager')
         if pipes_dir is None:
             log.debug('PipelineManager dir is None')
@@ -696,6 +693,7 @@ class PipelineManager:
             self.prompt_manager = prompt_manager
             self.llm_client = llm_client
             self.rag_client = rag_client
+            self.is_async = is_async
             self.pipes = {}
             self.load_pipes()
 
@@ -716,7 +714,7 @@ class PipelineManager:
             self.pipes[pf.stem] = {
                 'file': pf,
                 'conf': conf,
-                'func': LLMPipeline(pipe, self.llm_client, self.rag_client, pf.stem)
+                'func': LLMPipeline(pipe, self.llm_client, self.rag_client, pf.stem, self.is_async)
             }
 
         log.debug('All pipelines loaded')
