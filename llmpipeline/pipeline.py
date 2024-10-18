@@ -66,8 +66,12 @@ class LLMPipeline:
 
     def _init(self):
         pipe = self.pipe
-        self.manager = mp.Manager()
-        self.lock = self.manager.Lock()
+        self.exit_pipe = pipe.get('exit', None)
+        if 'exit' in pipe: del pipe['exit']
+
+        if not self.is_async:
+            self.manager = mp.Manager()
+            self.lock = self.manager.Lock()
 
         pipe_manager = {}
         for e in pipe:
@@ -82,7 +86,10 @@ class LLMPipeline:
                         del pipe[e]['llm_backend']
                     else:
                         llm_backend = self.llm_backend
-                    pipe_manager[e] = LLMPipe(e, run_time=self.manager.list(), inout_log=self.manager.list(), llm=llm_backend, lock=self.lock, **pipe[e])
+                    if self.is_async:
+                        pipe_manager[e] = LLMPipe(e, llm=llm_backend, **pipe[e])
+                    else:
+                        pipe_manager[e] = LLMPipe(e, run_time=self.manager.list(), inout_log=self.manager.list(), llm=llm_backend, lock=self.lock, **pipe[e])
                 case 'rag':
                     if 'rag_param' in pipe[e]:
                         param = dict(pipe[e]['rag_param'])
@@ -93,7 +100,10 @@ class LLMPipeline:
                         del pipe[e]['rag_backend']
                     else:
                         rag_backend = self.rag_backend
-                    pipe_manager[e] = RAGPipe(e, run_time=self.manager.list(), inout_log=self.manager.list(), rag=rag_backend, lock=self.lock, **pipe[e])
+                    if self.is_async:
+                        pipe_manager[e] = RAGPipe(e, rag=rag_backend, **pipe[e])
+                    else:
+                        pipe_manager[e] = RAGPipe(e, run_time=self.manager.list(), inout_log=self.manager.list(), rag=rag_backend, lock=self.lock, **pipe[e])
         self.pipe_manager = pipe_manager
         log.debug(f"'{self.name}' Pipe manager initialization successful")
 
@@ -314,6 +324,25 @@ class LLMPipeline:
         
         return info
 
+    def reformat_return(self, data):
+        if 'error_msg' not in data and self.exit_pipe is not None:
+            ret = {}
+            for k, v in self.exit_pipe.items():
+                if type(v) is str:
+                    d = data
+                    for i in v.split('.'): d = d[i]
+                    ret[k] = d
+                elif type(v) is list and type(v[0]) is dict:
+                    d = []
+                    for i in range(len(data[list(v[0].values())[0]])):
+                        t = {}
+                        for m, n in v[0].items():
+                            t[m] = data[n][i]
+                        d.append(t)
+                    ret[k] = d
+            return ret
+        return data
+
     def task_process(self, pid, task_queue, perf_queue, pipe_manager, data, lock):
         name = f'pid: {pid}'
         log.debug(f'{name}, start')
@@ -511,10 +540,9 @@ class LLMPipeline:
 
         perf = []
         while not perf_queue.empty(): perf.append(perf_queue.get())
-
         info = self.gen_info(r, perf, start_t, save_pref)
 
-        return r, info
+        return self.reformat_return(r), info
 
     async def async_task(self, pipe_name, queue, result, perf):
         start_time = time.time()
@@ -662,7 +690,8 @@ class LLMPipeline:
                     for v in i.values():
                         asyncio_queue[v] = asyncio.Queue()
         # put data into queue
-        for k, v in data.items(): asyncio_queue[k].put_nowait(v)
+        for k, v in data.items():
+            if k in asyncio_queue: asyncio_queue[k].put_nowait(v)
 
         perf = []
         tasks = []
@@ -670,9 +699,10 @@ class LLMPipeline:
             task = asyncio.create_task(self.async_task(pipe_name, asyncio_queue, data, perf))
             tasks.append(task)
         await asyncio.gather(*tasks)
+        log.debug(f'final out:\n{json.dumps(data, indent=4, ensure_ascii=False)}')
 
         info = self.gen_info(data, perf, start_t, save_pref)
-        return data, info
+        return self.reformat_return(data), info
 
     @property
     def run(self):
