@@ -17,7 +17,7 @@ class PipelineAPI:
     def __init__(self, prompt_dir, pipeline_dir, llm_client=None, rag_client=None, is_async=False):
         router = APIRouter(prefix='/api')
         prompt_manager = PromptManager(prompt_dir)
-        pipeline_manager = PipelineManager(pipeline_dir, prompt_manager, llm_client, rag_client, is_async)
+        pipeline_manager = PipelineManager(llm_client, rag_client, is_async, pipeline_dir, prompt_manager)
 
         @router.get("/prompt/list")
         async def prompt_list():

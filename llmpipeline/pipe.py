@@ -51,11 +51,12 @@ class LLMPipe:
                 out = self._json(resp)
                 self.log('json', out)
 
-                if out and all(map(lambda x: x[0] in out and type(out[x[0]]) is x[1], self.format.items())):
-                    self.log(f'check {self.format}', '✓')
-                else:
-                    self.log(f'check {self.format}', '✗')
-                    out = None
+                if self.format is not None:
+                    if out and all(map(lambda x: x[0] in out and type(out[x[0]]) is x[1], self.format.items())):
+                        self.log(f'check {self.format}', '✓')
+                    else:
+                        self.log(f'check {self.format}', '✗')
+                        out = None
             else:
                 out = resp
 
@@ -94,11 +95,12 @@ class LLMPipe:
                 out = self._json(resp)
                 self.log('json', out)
 
-                if out and all(map(lambda x: x[0] in out and type(out[x[0]]) is x[1], self.format.items())):
-                    self.log(f'check {self.format}', '✓')
-                else:
-                    self.log(f'check {self.format}', '✗')
-                    out = None
+                if self.format is not None:
+                    if out and all(map(lambda x: x[0] in out and type(out[x[0]]) is x[1], self.format.items())):
+                        self.log(f'check {self.format}', '✓')
+                    else:
+                        self.log(f'check {self.format}', '✗')
+                        out = None
             else:
                 out = resp
 
@@ -124,6 +126,12 @@ class LLMPipe:
                 break
         return out
 
+    def __str__(self):
+        return f"<{self.__class__.__name__}: {self.name}, prompt: {self.prompt.name}, json: {self.return_json}>"
+
+    def __repr__(self):
+        return self.__str__()
+
 class RAGPipe:
     def __init__(self, name, rag=None, verbose=True, return_key=None, lock=None, run_time=None, inout_log=None, **kargs):
         self.name = name
@@ -147,7 +155,7 @@ class RAGPipe:
         start_t = time.time()
         out = []
         if type(inp) is list:
-            self.log('get list:', inp)
+            self.log('get list', inp)
             inout = []
             for i in inp:
                 self.log('inp', i)
@@ -234,3 +242,9 @@ class RAGPipe:
             self.run_time.append(t)
             self.inout_log.extend(inout)
         return out
+
+    def __str__(self):
+        return f"<{self.__class__.__name__}: {self.name}>"
+
+    def __repr__(self):
+        return self.__str__()

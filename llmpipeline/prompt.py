@@ -1,6 +1,4 @@
 import json
-import importlib
-from pathlib import Path
 from .log import log
 
 class PromptKeys:
@@ -59,26 +57,3 @@ class Prompt:
             log.debug(f'Save prompt [{self.name}] to: {self.file}')
             with open(self.file, 'w') as f:
                 f.write(f'prompt="""{self.text}"""\nkeys={self.keys}')
-
-
-class PromptManager:
-    def __init__(self, prompts_dir=None):
-        log.debug('Setup PromptManager')
-        if prompts_dir is None:
-            log.debug('PromptManager dir is None')
-        else:
-            self.prompts_dir = Path(prompts_dir)
-            self.prompts = {}
-            self.load_prompts()
-
-    def load_prompts(self):
-        self.prompts = {}
-        log.debug(f'Start load prompts: {self.prompts_dir}')
-        prompt_files = list(self.prompts_dir.glob('*_prompt.py'))
-        log.debug(f'Find {len(prompt_files)} prompt files: {[p.stem for p in prompt_files]}')
-
-        for pf in prompt_files:
-            m = importlib.import_module(f'{str(self.prompts_dir).replace("/",".")}.{pf.stem}')
-            self.prompts[pf.stem] = Prompt(m.prompt, m.keys, pf.stem, pf)
-
-        log.debug('All prompts loaded')

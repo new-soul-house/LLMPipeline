@@ -1,59 +1,72 @@
-import sys 
+import sys
+import time
+import asyncio
 sys.path.append("..")
-from llmpipeline import LLMPipeline, Prompt
+from llmpipeline import PipelineManager
 
-# set custom prompt
-example_prompt = Prompt("""
-...
-{inp1}
-xxx
-""", keys=['{inp1}'])
-
-# set api
-def llm_api(inp):
+def llm(inp):
+    if '请你根据患者信息诊断出所患疾病' in inp: return '无法确定'
+    elif 'Task: Please select' in inp:
+        if 'Input: 无法确定' in inp: return '无法确定'
+        else: return '确诊'
+    elif '请你根据患者信息和诊断给出具体的治疗建议' in inp: return '无'
+    elif '请你根据患者信息提取出所有症状' in inp: return '{"symptoms": ["夜盲", "视力差", "易摔跤", "自幼身材矮小", "卵巢和子宫发育异常", "幼稚子宫", "月经不规律"]}'
+    elif '请你根据患者信息和每个症状对应的疾病' in inp: return '先天性子宫发育不全'
     return inp
 
-def llm_api2(inp):
-    return [f'{inp}_out{i}' for i in range(3)]
+def rag(inp):
+    data = {"symptoms": [
+                {"symptom": "夜盲", "possible_diseases": ["维生素A缺乏症", "视网膜色素变性", "先天性夜盲症"]},
+                {"symptom": "视力差", "possible_diseases": ["近视", "远视", "散光", "白内障", "青光眼", "视网膜疾病"]},
+                {"symptom": "易摔跤", "possible_diseases": ["平衡障碍", "内耳疾病", "神经系统疾病", "视力问题"]},
+                {"symptom": "自幼身材矮小", "possible_diseases": ["生长激素缺乏症", "甲状腺功能减退症", "染色体异常", "营养不良"]},
+                {"symptom": "卵巢和子宫发育异常", "possible_diseases": ["先天性卵巢发育不全", "先天性子宫发育异常", "内分泌紊乱"]},
+                {"symptom": "幼稚子宫", "possible_diseases": ["先天性子宫发育不全", "内分泌紊乱", "染色体异常"]},
+                {"symptom": "月经不规律", "possible_diseases": ["多囊卵巢综合征", "甲状腺功能异常", "内分泌紊乱", "压力或生活方式因素"]}
+            ]}
+    for sym in data['symptoms']:
+        if inp == sym['symptom']: return sym
+    return None
 
-def rag_api(inp):
-    return inp
+def llm_client(inp):
+    time.sleep(1)
+    return llm(inp)
 
-# set input data
-data = {
-    'inp': 'test input text ...',
+async def llm_client_async(inp):
+    await asyncio.sleep(1)
+    return llm(inp)
+
+def rag_client(inp):
+    time.sleep(1)
+    return rag(inp)
+
+async def rag_client_async(inp):
+    await asyncio.sleep(1)
+    return rag(inp)
+
+test_task = {
+    'test_pipe': [
+        {
+            '患者信息': '患者女性，现年29岁。因自幼夜盲、视力差、易摔跤来首都医科大学附属北京同仁医院北京同仁眼科中心就诊。既往病史：患者为足月顺产，无吸氧史，出生体重正常，1岁时学会说话和行走。自幼身材矮小，12岁时身高仅为130 cm（12岁女童身高参考值140~155 cm），但智力发育正常。患者16岁时仍未来月经，到当地医院检查发现卵巢和子宫发育异常，被诊断为“幼稚子宫”，进行了激素替代治疗后来月经并长高，药物持续使用半年，停药后月经停止，此后未规律使用药物。家族史：患者哥哥无异常，父母之间无血缘关系。',
+        },
+    ]
 }
 
-# set pipeline
-demo_pipe = {
-    'process_input': {
-        'prompt': example_prompt,
-        'backend': 'llm_api2',
-        'return_json': False,
-        'inp': ['inp'],
-        'out': 'out1',
-        'next': ['loop_out1'],
-    },
-    'loop_out1': {
-        'inp': 'out1',
-        'pipe_in_loop': ['llm1'],
-        'next': ['rag1'],
-    },
-    'llm1': {
-        'prompt': example_prompt,
-        'return_json': False,
-        'inp': ['out1'],
-        'out': 'out2',
-        # 'next': ['rag1'],
-    },
-    'rag1': {
-        'inp': ['out2'],
-        'out': 'out3',
-        'next': ['exit'],
-    },
-}
+def mp_test():
+    pm = PipelineManager(llm_client, rag_client, is_async=False)
 
-# running pipeline
-pipeline = LLMPipeline(demo_pipe, llm_api, rag_api)
-result, info = pipeline.run(data, core_num=2, save_pref=True)
+    for pipe_name, data_arr in test_task.items():
+        for data in data_arr:
+            r, info = pm.pipes[pipe_name].run(data, save_pref=True)
+            if 'error_msg' in r: print(r['error_msg'].strip().split('\n')[-1])
 
+async def async_test():
+    pm = PipelineManager(llm_client_async, rag_client_async)
+
+    for pipe_name, data_arr in test_task.items():
+        for data in data_arr:
+            r, info = await pm.pipes[pipe_name].run(data, save_perf=False)
+            if 'error_msg' in r: print(r['error_msg'].strip().split('\n')[-1])
+
+# mp_test()
+asyncio.run(async_test())
