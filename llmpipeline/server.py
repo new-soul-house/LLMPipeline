@@ -15,13 +15,13 @@ import threading
 from io import BytesIO
 from pathlib import Path
 from itertools import chain
+from functools import partial
 from PIL import Image, ImageOps, PngImagePlugin
 from typing import Optional, Dict, Any, Callable
-from functools import partial
-
 from .log import log
 
 PipelineServer = server = FastAPI(title='llmpipeline server')
+PipelineServer.api = None
 web_dir = 'web'
 web_root = Path(f'{__file__[:__file__.rindex("/")]}/{web_dir}')
 server.mount("/web", StaticFiles(directory=web_root, html=True), name="llmpipeline server web")
@@ -254,57 +254,10 @@ class TaskWorker(threading.Thread):
         self.send_msg("execution_start", {"prompt_id": prompt_id}, ws_id)
         self.send_msg("execution_cached", {"nodes":[], "prompt_id": prompt_id}, ws_id)
 
-        # 模拟
-        for node_id in [4, 10, 11, 5, 13]:
-            data = {
-                "node": str(node_id), 
-                "display_node": str(node_id),
-                "prompt_id": prompt_id
-            }
-            self.send_msg("executing", data, ws_id)
-            time.sleep(2)
-
-        for i in range(20):
-            data = {
-                "value": i+1,
-                "max": 20,
-                "prompt_id": prompt_id,
-                "node": "13"
-            }
-            self.send_msg("progress", data, ws_id)
-            time.sleep(.5)
-
-        for node_id in [12, 9]:
-            data = {
-                "node": str(node_id), 
-                "display_node": str(node_id),
-                "prompt_id": prompt_id
-            }
-            self.send_msg("executing", data, ws_id)
-            time.sleep(2)
-
-        out = {
-            "node": "9",
-            "display_node": "9",
-            "output": {
-                "images": [{
-                    "filename": "1.png",
-                    "subfolder": "",
-                    "type": "temp"
-                }],
-            },
-            "prompt_id": prompt_id
-        }
-
-        # out = {
-        #     "node": "2",
-        #     "display_node": "2",
-        #     "output": {
-        #         "string": ["1234dedede"],
-        #     },
-        #     "prompt_id": prompt_id
-        # }
-        self.send_msg("executed", out)
+        out = None
+        if PipelineServer.api:
+            pipe = PipelineServer.api.pipeline_manager.add_pipe('comfyUI', is_seq=True)
+            out = pipe.run(prompt_id, ws_id, task_data, self.send_msg)
 
         return out
 
@@ -365,10 +318,11 @@ async def get_extensions():
 
 @server.get("/object_info")
 async def get_object_info():
-    with open(web_root / 'my_nodes.json', 'r') as f:
+    with open(web_root / 'addition/my_nodes.json', 'r') as f:
         out = json.load(f)
-    with open(web_root / 'nodes.json', 'r') as f:
+    with open(web_root / 'addition/nodes.json', 'r') as f:
         out |= json.load(f)
+    if server.api: out |= server.api.pipeline_manager.export_nodes()
     return out
 
 @server.get("/prompt")
@@ -423,5 +377,8 @@ async def view_image(filename: Optional[str] = None, type: Optional[str] = None,
     if not filename:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    image_path = web_root / 'images/ChatGPT.png'
+    if filename not in ['doubao.png', 'ChatGPT.png', 'grok.png', 'wenxin.png']:
+        image_path = web_root / 'images/ChatGPT.png'
+    else:
+        image_path = web_root / f'images/{filename}'
     return FileResponse(image_path)

@@ -217,6 +217,9 @@ class Node:
         else:
             return self.mp_run
 
+    def export_as_comfyui(self):
+        return {}
+
     def __str__(self):
         return f"<{self.__class__.__name__}: {self.name}, next: {[n.name for n in self.next]}>"
 
@@ -244,6 +247,34 @@ class LLMNode(Node):
         tree.pipe_manager[self.name] = pipe
         self.pipe = pipe
 
+    def export_as_comfyui(self):
+        inps = {i:["TEXT"] for i in self.pipe.prompt.keys}
+        opt_inps = {"模型": ["MODEL"]}
+        prompt = {
+            "prompt": [
+                "STRING",
+                {"default": self.pipe.prompt.text, "multiline": True, "dynamicPrompts": True}
+            ]
+        }
+        outs = self.mermaid_outs
+        d = {
+            "input": {
+                "required": inps | prompt,
+                "optional": opt_inps
+            },
+            "input_order": {"required": self.pipe.prompt.keys},
+            "output": ["TEXT"] * len(outs),
+            "output_is_list": [False] * len(outs),
+            "output_name": outs,
+            "name": self.name,
+            "display_name": self.name,
+            "description": f"{self.name} prompt",
+            "python_module": "nodes",
+            "category": "提示词",
+            "output_node": False,
+        }
+        return {self.name: d}
+
 class RAGNode(Node):
     mermaid_style = 'fill:#FE929F,color:black'
     mermaid_shape = lambda x: f'{x}("{x}")'
@@ -268,6 +299,46 @@ class RAGNode(Node):
                     )
         tree.pipe_manager[self.name] = pipe
         self.pipe = pipe
+
+    def export_as_comfyui(self):
+        param = self.conf.get('rag_param', {})
+        inps = {
+            "text": ["TEXT"],
+            "kb": ["STRING", {
+                "default": param.get('kb_id', None),
+                "multiline": False,
+                "dynamicPrompts": True
+            }],
+            "top_k": ["INT", {
+                "default": param.get('top_k', 1),
+                "min": 1
+            }],
+            "threshold": ["FLOAT", {
+                "default": param.get('threshold', 0.5),
+                "min": 0.01,
+                "max": 1.0,
+                "step": 0.1
+            }]
+        }
+        opt_inps = {}
+        outs = self.mermaid_outs
+        d = {
+            "input": {
+                "required": inps,
+                "optional": opt_inps
+            },
+            "input_order": {"required": list(inps.keys())},
+            "output": ["TEXT"] * len(outs),
+            "output_is_list": [False] * len(outs),
+            "output_name": outs,
+            "name": self.name,
+            "display_name": self.name,
+            "description": f"{self.name} rag search",
+            "python_module": "nodes",
+            "category": "知识库",
+            "output_node": False,
+        }
+        return {self.name: d}
 
 class LoopNode(Node):
     mermaid_style = 'fill:#CC8A4D,color:black'
@@ -442,6 +513,31 @@ class BranchNode(Node):
 
         if (node := self.next.get(cond, None)): queue.put((node.name, config))
         log.debug(f'[BranchNode] condition: {cond}, goto node: {node}')
+
+    def export_as_comfyui(self):
+        inps = {
+            "text": ["TEXT"],
+            "use_llm": ["BOOLEAN", {"default": self.conf.get('use_llm', False)}],
+        }
+        opt_inps = {}
+        outs = list(self.conf['next'].keys())
+        d = {
+            "input": {
+                "required": inps,
+                "optional": opt_inps
+            },
+            "input_order": {"required": list(inps.keys())},
+            "output": ["TEXT"] * len(outs),
+            "output_is_list": [False] * len(outs),
+            "output_name": outs,
+            "name": self.name,
+            "display_name": self.name,
+            "description": f"{self.name} 分支流程",
+            "python_module": "nodes",
+            "category": "控制流",
+            "output_node": False,
+        }
+        return {self.name: d}
 
     def __str__(self):
         arr = [f'{cond} -> {n.name}' for cond, n in self.next.items()]

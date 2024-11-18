@@ -108,3 +108,15 @@ class PipelineManager:
                 return f'Error: {e}'
         else:
             return 'Error: name must end with `_pipe`.'
+
+    def export_nodes(self):
+        nodes = {}
+        for pipeline in self.pipes.values():
+            pt = pipeline.pipetree
+            for node in pt.node_manager.values():
+                nodes |= node.export_as_comfyui()
+        return nodes
+
+    def add_pipe(self, name, pipeconf=None, pipefile=None, is_async=False, is_seq=False):
+        self.pipes[name] = Pipeline(self.llm_client, self.rag_client, self.prompt_manager, pipeconf=pipeconf, pipefile=pipefile, is_async=is_async, is_seq=is_seq)
+        return self.pipes[name]
