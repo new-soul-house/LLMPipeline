@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import sys
 import time
 import asyncio
@@ -7,11 +9,13 @@ from llmpipeline import PipelineManager
 def llm(inp):
     if '请你根据患者信息诊断出所患疾病' in inp: return '无法确定'
     elif 'Task: Please select' in inp:
-        if 'Input: 无法确定' in inp: return '无法确定'
-        else: return '确诊'
+        if 'Input: 无法确定' in inp: return '{"item_id": "#2"}'
+        else: return '{"item_id": "#1"}'
     elif '请你根据患者信息和诊断给出具体的治疗建议' in inp: return '无'
     elif '请你根据患者信息提取出所有症状' in inp: return '{"symptoms": ["夜盲", "视力差", "易摔跤", "自幼身材矮小", "卵巢和子宫发育异常", "幼稚子宫", "月经不规律"]}'
     elif '请你根据患者信息和每个症状对应的疾病' in inp: return '先天性子宫发育不全'
+    elif '请你根据患者信息提取出患者的出生日期' in inp: return '1980-03-04'
+    elif '请你根据患者信息提取出患者的身高体重' in inp: return '{"height": 1.76, "weight": 69}'
     return inp
 
 def rag(inp):
@@ -45,9 +49,9 @@ async def rag_client_async(inp):
     return rag(inp)
 
 test_task = {
-    'test_pipe': [
+    'test_pipeline': [
         {
-            '患者信息': '患者女性，现年29岁。因自幼夜盲、视力差、易摔跤来首都医科大学附属北京同仁医院北京同仁眼科中心就诊。既往病史：患者为足月顺产，无吸氧史，出生体重正常，1岁时学会说话和行走。自幼身材矮小，12岁时身高仅为130 cm（12岁女童身高参考值140~155 cm），但智力发育正常。患者16岁时仍未来月经，到当地医院检查发现卵巢和子宫发育异常，被诊断为“幼稚子宫”，进行了激素替代治疗后来月经并长高，药物持续使用半年，停药后月经停止，此后未规律使用药物。家族史：患者哥哥无异常，父母之间无血缘关系。',
+            '患者信息': '患者女性，1980年3月4日出生，身高176cm，体重69kg。因自幼夜盲、视力差、易摔跤来首都医科大学附属北京同仁医院北京同仁眼科中心就诊。既往病史：患者为足月顺产，无吸氧史，出生体重正常，1岁时学会说话和行走。自幼身材矮小，12岁时身高仅为130 cm（12岁女童身高参考值140~155 cm），但智力发育正常。患者16岁时仍未来月经，到当地医院检查发现卵巢和子宫发育异常，被诊断为“幼稚子宫”，进行了激素替代治疗后来月经并长高，药物持续使用半年，停药后月经停止，此后未规律使用药物。家族史：患者哥哥无异常，父母之间无血缘关系。',
         },
     ]
 }

@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import uuid
 import datetime
 from .log import log, log_dir
 from .pipetree import PipeTree
@@ -27,6 +28,7 @@ class Pipeline:
             'total_time': time.time()-start_t,
             'mermaid': {},
         }
+
         for k in sorted(pipe_manager, key=lambda k: pipe_manager[k].time or -1):
             info['detail'][k] = {
                 # 'run_time': list(pipe_manager[k].run_time),
@@ -39,17 +41,20 @@ class Pipeline:
             fname = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
             if check_cmd_exist('mmdc'):
                 pipe_img = str(log_dir / f'{fname}_pipe.png')
-                os.popen(f'echo "{info["mermaid"]["pipe"]}" | mmdc -o {pipe_img}')
+                tmp_file = f'/tmp/{uuid.uuid4()}'
+                with open(tmp_file, 'w') as f: f.write(info["mermaid"]["pipe"])
+                log.debug(f'Save pipeline png in: {tmp_file}')
+                os.popen(f'mmdc -i {tmp_file} -o {pipe_img} -s 3')
                 log.debug(f'save {pipe_img}')
                 perf_img = str(log_dir / f"{fname}_perf.png")
-                os.popen(f'echo "{info["mermaid"]["perf"]}" | mmdc -o {perf_img}')
+                os.popen(f'echo "{info["mermaid"]["perf"]}" | mmdc -i - -o {perf_img} -s 3')
                 log.debug(f'save {perf_img}')
-                md_pipe = f"![pipe_img]({pipe_img.split('/')[1]})"
-                md_perf = f"![perf_img]({perf_img.split('/')[1]})"
+                # md_pipe = f"![pipe_img]({pipe_img.split('/')[1]})"
+                # md_perf = f"![perf_img]({perf_img.split('/')[1]})"
             else:
                 log.warning('Please install mmdc to generate mermaid images.')
-                md_pipe = f"```mermaid\n{info['mermaid']['pipe']}```"
-                md_perf = f"```mermaid\n{info['mermaid']['perf']}```"
+            md_pipe = f"```mermaid\n{info['mermaid']['pipe']}```"
+            md_perf = f"```mermaid\n{info['mermaid']['perf']}```"
 
             r_str = f'```json\n{json.dumps(data, indent=4, ensure_ascii=False)}\n```'
             md_content = f'## result\n{r_str}\n## Pipeline\n{md_pipe}\n## Perfermence\n{md_perf}'

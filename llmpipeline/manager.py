@@ -56,7 +56,7 @@ class PipelineManager:
     def load_pipes(self):
         self.pipes = {}
         log.debug(f'Start load pipelines: {self.pipes_dir}')
-        pipe_files = list(self.pipes_dir.glob('*_pipe.py'))
+        pipe_files = list(self.pipes_dir.glob('*_pipeline.py'))
         log.debug(f'Find {len(pipe_files)} pipeline files: {[p.stem for p in pipe_files]}')
 
         for pf in pipe_files:

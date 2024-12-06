@@ -1,3 +1,4 @@
+import re
 import copy
 import time
 import queue
@@ -7,10 +8,11 @@ import traceback
 import collections
 from enum import Enum
 from pathlib import Path
+from functools import reduce
 import multiprocessing as mp
 from .log import log
 from .prompt import Prompt
-from .pipe import LLMPipe, RAGPipe
+from .pipe import *
 
 class Data:
     mermaid_style = 'fill:#9BCFB8,color:black'
@@ -22,6 +24,12 @@ class DataState(Enum):
 class Node:
     mermaid_style = 'color:black'
     mermaid_shape = lambda x: f'{x}["{x}"]'
+    mermaid_inline = '-->'
+    mermaid_outline = '-.->'
+    mermaid_toexit = '--o'
+    mermaid_inline_passed = '==>'
+    mermaid_outline_passed = '==>'
+    mermaid_toexit_passed = '==o'
 
     def __init__(self, name, conf, tree=None):
         self.name = name
@@ -58,21 +66,27 @@ class Node:
         self.mermaid_outs = outs
         self.mermaid_data = self.mermaid_inps + self.mermaid_outs
 
+    def _get_mermaid_defines(self):
+        return [self.__class__.mermaid_shape(self.name)] + [Data.mermaid_shape(d) for d in self.mermaid_data]
+
     def get_mermaid(self, info=None):
-        inps = ' & '.join(self.mermaid_inps)
-        outs = ' & '.join(self.mermaid_outs)
+        inps = ' & '.join(self.mermaid_inps) or None
+        outs = ' & '.join(self.mermaid_outs) or None
 
-        defines = [self.__class__.mermaid_shape(self.name)] + [Data.mermaid_shape(d) for d in self.mermaid_data]
+        defines = self._get_mermaid_defines()
 
-        t = info["detail"][self.name]["avg_time"] if info else None
-        t = f'|{t:.2f}s|' if t is not None else ''
-        inout_link = f'{inps} --> {self.name} -.->{t} {outs}'
+        t = info["detail"][self.name]["avg_time"] if info and self.name in info['detail'] else None
+        if t is not None: t = f'|{t:.2f}s|'
+
+        inline = self.mermaid_inline_passed if self.run_cnt else self.mermaid_inline
+        outline = self.mermaid_outline_passed if self.run_cnt else self.mermaid_outline
+        inout_link = (inps, inline, self.name, outline, t, outs)
 
         links = [inout_link]
         for n in self.next:
             if n.name == 'exit':
-                t = f'|total: {info["total_time"]:.2f}s|' if info and self.name in info['exec_path'] else ''
-                links.append(f'{outs} --o{t} exit')
+                t = f'|total: {info["total_time"]:.2f}s|' if info and self.name in info['exec_path'] else None
+                links.append((None, None, outs, self.mermaid_toexit_passed if t else self.mermaid_toexit, t, 'exit'))
 
         return defines, links
 
@@ -170,8 +184,10 @@ class Node:
             for k in o:
                 set_data(k, out[k], config, queue)
         elif t is dict:
-            for k in o:
-                set_data(o[k], out[k], config, queue)
+            if out is not None:
+                for k in o: set_data(o[k], out[k], config, queue)
+            else:
+                for k in o: set_data(o[k], None, config, queue)
 
     def reset_out(self, queue):
         def q_del(q, k):
@@ -359,7 +375,8 @@ class LoopNode(Node):
     def get_mermaid(self, info=None):
         links = []
         inp = self.conf['inp'][0]
-        links.append(f'{inp} ==> {self.name}')
+        # links.append(f'{inp} ==> {self.name}')
+        links.append((None, None, inp, self.mermaid_inline, None, self.name))
         loop_inps = set()
         loop_outs = set()
         for i in self.loop_nodes:
@@ -368,12 +385,14 @@ class LoopNode(Node):
 
         l_out = ' & '.join(loop_outs - loop_inps)
         outs = f'{self.name}_done'
-        links.append(f'{l_out} ==> {outs}')
+        # links.append(f'{l_out} ==> {outs}')
+        links.append((None, None, l_out, self.mermaid_outline, None, outs))
 
         for n in self.next:
             if n.name == 'exit':
-                t = f'|total: {info["total_time"]:.2f}s|' if info else ''
-                links.append(f'{outs} --o{t} exit')
+                t = f'|total: {info["total_time"]:.2f}s|' if info else None
+                # links.append(f'{outs} --o{t} exit')
+                links.append((None, None, outs, self.mermaid_toexit_passed if t else self.mermaid_toexit, t, 'exit'))
 
         defines = [self.__class__.mermaid_shape(i) for i in [self.name, outs]]
 
@@ -448,10 +467,13 @@ class BranchNode(Node):
     mermaid_shape = lambda x: f'{x}{{"{x}"}}'
 
     def post_init(self):
+        self.passed_cond = set()
+        if 'use_llm' not in self.conf: self.conf['use_llm'] = False
         if self.conf['use_llm']:
             tree = self.tree
             self.conf['prompt'] = tree.prompt_manager.prompts['branch_node_prompt']
-            self.conf['return_json'] = False
+            self.conf['return_json'] = True
+            self.conf['format'] = {'item_id': str}
             if tree.is_async:
                 pipe = LLMPipe(self.name, llm=tree.llm_backend, **self.conf)
             else:
@@ -468,25 +490,35 @@ class BranchNode(Node):
 
     def update(self, nodes):
         self.next = {}
-        for cond, name in self.conf['next'].items():
-            if name in nodes: self.next[cond] = nodes[name]
+        for cond, item in self.conf['next'].items():
+            if (t := type(item)) is str:
+                if item in nodes: self.next[cond] = [nodes[item]]
+            elif t is list:
+                self.next[cond] = []
+                for name in item:
+                    if name in nodes: self.next[cond].append(nodes[name])
 
     def get_mermaid(self, info=None):
         inps = ' & '.join(self.mermaid_inps)
 
-        defines = [self.__class__.mermaid_shape(self.name)] + [Data.mermaid_shape(d) for d in self.mermaid_data]
+        defines = self._get_mermaid_defines()
 
-        t = info["detail"][self.name]["avg_time"] if info else None
-        t = f'|{t:.2f}s|' if t is not None else ''
-        inout_link = f'{inps} ==>{t} {self.name}'
+        t = info["detail"][self.name]["avg_time"] if info and self.name in info['detail'] else None
+        if t is not None: t = f'|{t:.2f}s|'
+        inline = self.mermaid_inline_passed if self.run_cnt else self.mermaid_inline
+        inout_link = (None, None, inps, inline, t, self.name)
 
         links = [inout_link]
-        for cond, n in self.next.items():
-            if n.name == 'exit':
+        for cond, arr in self.next.items():
+            nexts = [n.name for n in arr]
+            if 'exit' in nexts:
                 t = f'|{cond}, total: {info["total_time"]:.2f}s|' if info else f'|{cond}|'
-                links.append(f'{self.name} --o{t} exit')
-            else:
-                links.append(f'{self.name} --o|{cond}| {n.name}')
+                links.append((None, None, self.name, self.mermaid_toexit_passed if t else self.mermaid_toexit, t, 'exit'))
+                nexts.remove('exit')
+
+            if nexts:
+                outline = self.mermaid_outline_passed if cond in self.passed_cond else self.mermaid_outline
+                links.append((None, None, self.name, outline, f'|{cond}|', " & ".join(nexts)))
 
         return defines, links
 
@@ -494,25 +526,73 @@ class BranchNode(Node):
         inps = await self.get_inps(queue)
         if self.conf['use_llm']:
             items = list(self.conf['next'].keys())
-            cond = await self.pipe(*inps, items)
+            items_text = '\n'.join([f'[#{i+1}] {t}' for i, t in enumerate(items)])
+
+            retry = 0
+            while retry < 5:
+                if len(inps) == 1:
+                    cond = await self.pipe.async_call(inps[0], items_text)
+                else:
+                    inps_t = '\n'.join(f'{k}: {v}' for k,v in zip(self.conf['inp'], inps))
+                    cond = await self.pipe.async_call(inps_t, items_text)
+
+                if cond and type(cond) is dict:
+                    item_id = cond.get('item_id', '')
+                    if len(item_id) > 1 and item_id[0] == '#' and item_id[1:].isdigit() and (i := int(item_id[1:]) - 1) < len(items):
+                        cond = items[i]
+                        break
+                retry += 1
+        elif 'code' in self.conf:
+            if 'code_entry' in self.conf:
+                exec(self.conf['code'])
+                cond = locals()[self.conf['code_entry']](*inps)
+            else:
+                inps_dict = {k:v for k,v in zip(self.conf['inp'], inps)}
+                cond = eval(self.conf['code'].format(**inps_dict))
         else:
             cond = inps[0]
 
-        if (node := self.next.get(cond, None)):
-            task = asyncio.create_task(node.run(data, queue, dynamic_tasks), name=node.name)
-            dynamic_tasks.append(task)
-
-        log.debug(f'[BranchNode] condition: {cond}, goto node: {node}')
+        if type(cond) is dict: cond = str(cond)
+        self.passed_cond.add(cond)
+        if (nodes := self.next.get(cond, None)):
+            for node in nodes:
+                task = asyncio.create_task(node.run(data, queue, dynamic_tasks), name=node.name)
+                dynamic_tasks.append(task)
+        log.debug(f'[{self.name}] condition: {cond}, goto nodes: {nodes}')
 
     def current_mp_task(self, inps, data, queue, config=None):
         if self.conf['use_llm']:
             items = list(self.conf['next'].keys())
-            cond = self.pipe(*inps, items)
+            items_text = '\n'.join([f'[#{i+1}] {t}' for i, t in enumerate(items)])
+
+            retry = 0
+            while retry < 5:
+                if len(inps) == 1:
+                    cond = self.pipe(inps[0], items_text)
+                else:
+                    inps_t = '\n'.join(f'{k}: {v}' for k,v in zip(self.conf['inp'], inps))
+                    cond = self.pipe(inps_t, items_text)
+
+                if cond and type(cond) is dict:
+                    item_id = cond.get('item_id', '')
+                    if len(item_id) > 1 and item_id[0] == '#' and item_id[1:].isdigit() and (i := int(item_id[1:]) - 1) < len(items):
+                        cond = items[i]
+                        break
+                retry += 1
+        elif 'code' in self.conf:
+            if 'code_entry' in self.conf:
+                exec(self.conf['code'])
+                cond = locals()[self.conf['code_entry']](*inps)
+            else:
+                inps_dict = {k:v for k,v in zip(self.conf['inp'], inps)}
+                cond = eval(self.conf['code'].format(**inps_dict))
         else:
             cond = inps[0]
 
+        if type(cond) is dict: cond = str(cond)
+        self.passed_cond.add(cond)
         if (node := self.next.get(cond, None)): queue.put((node.name, config))
-        log.debug(f'[BranchNode] condition: {cond}, goto node: {node}')
+        log.debug(f'[{self.name}] condition: {cond}, goto node: {node}')
 
     def export_as_comfyui(self):
         inps = {
@@ -540,8 +620,141 @@ class BranchNode(Node):
         return {self.name: d}
 
     def __str__(self):
-        arr = [f'{cond} -> {n.name}' for cond, n in self.next.items()]
+        arr = [f'{cond} -> {[n.name for n in nodes]}' for cond, nodes in self.next.items()]
         return f"<{self.__class__.__name__}: {self.name}, next: {arr}>"
+
+class CodeNode(Node):
+    mermaid_style = 'fill:#FFFFAD,color:black'
+    mermaid_shape = lambda x: f'{x}[/"{x}"/]'
+
+    def _eval_format(self, item):
+        if type(item) is str:
+            return item.encode('unicode_escape').decode('utf-8')
+        else:
+            return item
+
+    async def current_task(self, data, queue, dynamic_tasks):
+        inps = await self.get_inps(queue)
+        if 'code_entry' in self.conf:
+            exec(self.conf['code'])
+            out = locals()[self.conf['code_entry']](*inps)
+        else:
+            inps_dict = {k:self._eval_format(v) for k,v in zip(self.conf['inp'], inps)}
+            out = eval(self.conf['code'].format(**inps_dict))
+        self.set_out(out, data, queue)
+
+    def current_mp_task(self, inps, data, queue, config=None):
+        if 'code_entry' in self.conf:
+            exec(self.conf['code'])
+            out = locals()[self.conf['code_entry']](*inps)
+        else:
+            inps_dict = {k:self._eval_format(v) for k,v in zip(self.conf['inp'], inps)}
+            out = eval(self.conf['code'].format(**inps_dict))
+        self.set_out(out, data, config=config)
+        for n in self.next: queue.put((n.name, config))
+
+class WebNode(Node):
+    mermaid_style = 'fill:#FAB6BF,color:black'
+    mermaid_shape = lambda x: f'{x}("{x}")'
+
+    def post_init(self):
+        tree = self.tree
+        search_pipe = None
+        if tree.is_async:
+            if 'search_engine' in self.conf['web']:
+                search_pipe = SearchPipe(self.name, **self.conf['web'])
+            browser_pipe = BrowserPipe(self.name)
+        else:
+            if 'search_engine' in self.conf['web']:
+                search_pipe = SearchPipe(
+                        self.name,
+                        lock=tree.mp_lock,
+                        run_time=tree.mp_manager.list(),
+                        inout_log=tree.mp_manager.list(),
+                        **self.conf
+                        )
+            browser_pipe = BrowserPipe(self.name)
+
+        tree.pipe_manager[self.name] = {'search': search_pipe, 'browser': browser_pipe}
+        self.search_pipe = search_pipe
+        self.browser_pipe = browser_pipe
+
+    def current_mp_task(self, inps, data, queue, config=None):
+        out = self.search_pipe(*inps)
+        self.set_out(out, data, config=config)
+
+        for n in self.next: queue.put((n.name, config))
+
+    async def current_task(self, data, queue, dynamic_tasks):
+        inps = await self.get_inps(queue)
+        out = await self.search_pipe.async_call(*inps)
+
+        browser_tasks = []
+        for url in self.loop_nodes:
+            task = asyncio.create_task(n.run(new_data, new_queue, loop_tasks))
+            browser_tasks.append(task)
+        while not all(t.done() for t in browser_tasks):
+            await asyncio.gather(*browser_tasks)
+
+        self.set_out(out, data, queue)
+
+class BrowserNode(Node):
+    ...
+
+class ValueNode(Node):
+    mermaid_style = 'fill:#eaffd0,color:black'
+    mermaid_shape = lambda n, x: f'{n}{{{{"{x}"}}}}'
+
+    def _get_mermaid_defines(self):
+        data_defs = [Data.mermaid_shape(d) for d in self.mermaid_data]
+        n = 25
+        t = str(self.conf['value'])
+        if len(t) > n: t = t[:n] + '...'
+        m = {'append': '\\+', 'assign': '='}[self.conf.get('mode', 'assign')]
+        d = f'{self.name}\n{m} {t}'
+        return [self.__class__.mermaid_shape(self.name, d)] + data_defs
+
+    def get_inps_mp(self, data, config=None):
+        def get_data(i):
+            if i not in data: return DataState.VOID
+            if type(data[i]) is list:
+                if config and i in config['loop_index']:
+                    loop_i = config['loop_index'][i]
+                    return data[i][loop_i]
+                elif DataState.VOID in data[i]:
+                    return DataState.VOID
+            return data[i]
+
+        mode = self.conf.get('mode', 'assign')
+        if mode == 'append':
+            if (d := get_data(self.conf['out'])) is DataState.VOID: return []
+            else: return [d]
+        else:
+            return [1]
+
+    def current_mp_task(self, inps, data, queue, config=None):
+        mode = self.conf.get('mode', 'assign')
+        if mode == 'append':
+            out = inps[0]
+            out.append(self.conf['value'])
+        else:
+            out = self.conf['value']
+        self.set_out(out, data, config=config)
+        for n in self.next: queue.put((n.name, config))
+
+    async def current_task(self, data, queue, dynamic_tasks):
+        mode = self.conf.get('mode', 'assign')
+        if mode == 'append':
+            i = self.conf['out']
+            out = await queue[i].get()
+            out.append(self.conf['value'])
+        else:
+            out = self.conf['value']
+        self.set_out(out, data, queue)
+
+class DatabaseNode(Node):
+    def aa(self):
+        ...
 
 class ExitNode(Node):
     mermaid_style = 'fill:#3D3E3F,color:white'
@@ -609,7 +822,7 @@ class PipeTree:
     def load(self, pipefile):
         if type(pipefile) is str: pipefile = Path(pipefile)
         m = importlib.import_module(str(pipefile).replace('/','.')[:-3])
-        self.pipeconf = m.pipe
+        self.pipeconf = m.pipeline
         if self.name is None: self.name = pipefile.stem
 
     def _check(self):
@@ -626,7 +839,11 @@ class PipeTree:
         for p in conf:
             if (nt := conf[p].get('next', None)):
                 if type(nt) is dict:
-                    deps.update(list(nt.values()))
+                    arr = []
+                    for v in nt.values():
+                        if type(v) is str: arr.append(v)
+                        elif type(v) is list: arr += v
+                    deps.update(arr)
                 elif type(nt) is list:
                     deps.update(nt)
             deps.update(conf[p].get('pipe_in_loop', []))
@@ -646,6 +863,12 @@ class PipeTree:
                 node = LoopNode(name, conf, self)
             elif 'use_llm' in conf or type(conf.get('next', None)) is dict:
                 node = BranchNode(name, conf, self)
+            elif 'code' in conf:
+                node = CodeNode(name, conf, self)
+            elif 'web' in conf:
+                node = WebNode(name, conf, self)
+            elif 'value' in conf:
+                node = ValueNode(name, conf, self)
             else:
                 log.error(f"Unable to identify node type: [{name}] {conf}")
                 exit()
@@ -688,10 +911,26 @@ class PipeTree:
             defs, lks = n.get_mermaid(info)
             defines.update(defs)
             links.update(lks)
-            for i in n.loop_nodes + (n.next if type(n.next) is list else list(n.next.values())):
+            for i in n.loop_nodes + (n.next if type(n.next) is list else reduce(lambda a,b:a+b, n.next.values())):
                 if i not in passed_nodes: nodes.append(i)
 
-        for i in list(defines)+list(links):
+        links_d = {}
+        for link in links:
+            item = (link[0], link[2], link[5])
+            if item in links_d:
+                if link[4]: links_d[item] = link
+            else:
+                links_d[item] = link
+        links_str = []
+        for inps, inline, self.name, outline, t, outs in links_d.values():
+            if t is None: t = ''
+            if inps:
+                link = f'{inps} {inline} {self.name} {outline}{t} {outs}'
+            else:
+                link = f'{self.name} {outline}{t} {outs}'
+            links_str.append(link)
+
+        for i in list(defines)+links_str:
             mermaid += f'{indent}{i}\n'
 
         # add style
@@ -742,187 +981,15 @@ class PipeTree:
         dynamic_tasks = []
         queue = collections.defaultdict(asyncio.Queue)
         for k, v in data.items(): queue[k].put_nowait(v)
-        await asyncio.gather(*[asyncio.create_task(n.run(data, queue, dynamic_tasks)) for n in self.start_nodes])
-        while not all(t.done() for t in dynamic_tasks):
-            await asyncio.gather(*dynamic_tasks)
-        return data
-
-    def task_process(self, pid, task_queue, perf_queue, pipe_manager, data, lock):
-        name = f'pid: {pid}'
-        log.debug(f'{name}, start')
-
-        print(self.node_manager)
-
         try:
-            while True:
-                start_time = time.time()
-                try:
-                    entry, pipes = task_queue.get_nowait()
-                    # log.debug(f'{name}, get entry: {entry}')
-                    # time.sleep(5)
-                    if entry == 'exit':
-                        # if task_queue.qsize() == 0:
-                        task_queue.put((entry, pipes))
-                        log.debug(f'{name}, exit')
-                        break
-                        # else: continue
-                except queue.Empty:
-                    # log.debug(f'{name}, queue empty, wait new task ...')
-                    # time.sleep(5)
-                    # break
-                    continue
-
-                param = pipes[entry]
-                match param['mode']:
-                    case 'llm':
-                        pipe = pipe_manager[entry]
-                    case 'rag':
-                        pipe = pipe_manager[entry]
-                    case 'loop':
-                        loop_item = param['inp'][0]
-                        with lock: data[entry] = {loop_item: data[loop_item]}
-                        n = len(data[loop_item])
-
-                        for i, item in enumerate(data[loop_item]):
-                            nps = copy.deepcopy(pipes)
-
-                            for nt in param['pipe_in_loop']:
-                                nps[nt]['loop'] = entry
-                                nps[nt]['loop_index'] = i
-                                o = nps[nt]['out']
-                                with lock:
-                                    if type(o) is str:
-                                        pre = data[entry]
-                                        pre[o] = [State.WAIT] * n
-                                        data[entry] = pre
-                                    elif type(o) is list:
-                                        for j in o:
-                                            pre = data[entry]
-                                            pre[j] = [State.WAIT] * n
-                                            data[entry] = pre
-                                    elif type(o) is dict:
-                                        for j in o.values():
-                                            pre = data[entry]
-                                            pre[j] = [State.WAIT] * n
-                                            data[entry] = pre
-
-                                task_queue.put((nt, nps))
-
-                        loop_end_entry = f'{entry}_end'
-                        pipes |= {loop_end_entry: {
-                            'mode': 'loop_end',
-                            'loop': entry,
-                            'next': param['next'],
-                        }}
-                        task_queue.put((loop_end_entry, pipes))
-                        perf_queue.put((name, entry, start_time, time.time()))
-                        continue
-                    case 'loop_end':
-                        has_done = []
-                        for v in data[param['loop']].values():
-                            has_done.append(all([i is not State.WAIT for i in v]))
-
-                        if all(has_done):
-                            loop_data = data[param['loop']]
-                            with lock:
-                                for k,v in loop_data.items():
-                                    if k not in data: data[k] = v
-                                del data[param['loop']]
-
-                            if 'next' in param:
-                                for e in param['next']:
-                                    task_queue.put((e, pipes))
-                            perf_queue.put((name, entry, start_time, time.time()))
-                        else:
-                            task_queue.put((entry, pipes))
-                        continue
-
-                if 'loop' in param:
-                    has_inp = []
-                    for i in param['inp']:
-                        if type(i) is str:
-                            has_inp.append(i in data or (i in data[param['loop']] and data[param['loop']][i][param['loop_index']] is not State.WAIT))
-                        elif type(i) is dict:
-                            for j in i.values():
-                                has_inp.append(j in data or (j in data[param['loop']] and data[param['loop']][j][param['loop_index']] is not State.WAIT))
-
-                    if all(has_inp):
-                        inps = []
-                        for i in param['inp']:
-                            if type(i) is str:
-                                if i in data[param['loop']]:
-                                    inps.append(data[param['loop']][i][param['loop_index']])
-                                else:
-                                    inps.append(data[i])
-                            elif type(i) is dict:
-                                d = {}
-                                for k, v in i.items():
-                                    if v in data[param['loop']]:
-                                        d[k] = data[param['loop']][v][param['loop_index']]
-                                    else:
-                                        d[k] = data[v]
-                                inps.append(d)
-
-                        out = pipe(*inps)
-                        if type(param['out']) is str:
-                            with lock:
-                                pre = data[param['loop']]
-                                pre[param['out']][param['loop_index']] = out
-                                data[param['loop']] = pre
-                        elif type(param['out']) is list:
-                            with lock:
-                                pre = data[param['loop']]
-                                for k in param['out']:
-                                    pre[k][param['loop_index']] = out[k]
-                                data[param['loop']] = pre
-                        elif type(param['out']) is dict:
-                            with lock:
-                                pre = data[param['loop']]
-                                for k in param['out']:
-                                    pre[param['out'][k]][param['loop_index']] = out[k]
-                                data[param['loop']] = pre
-
-                        if 'next' in param:
-                            for e in param['next']:
-                                task_queue.put((e, pipes))
-                        perf_queue.put((name, entry, start_time, time.time()))
-                    else:
-                        task_queue.put((entry, pipes))
-                else:
-                    has_inp = all(i in data for i in param['inp'])
-                    if has_inp:
-                        inps = []
-                        for i in param['inp']:
-                            if type(i) is str:
-                                inps.append(data[i])
-                            elif type(i) is dict:
-                                inps.append({k:data[v] for k, v in i.items()})
-
-                        out = pipe(*inps)
-                        if type(param['out']) is str:
-                            with lock:
-                                data[param['out']] = out
-                        elif type(param['out']) is list:
-                            with lock:
-                                for k in param['out']:
-                                    data[k] = out[k]
-                        elif type(param['out']) is dict:
-                            with lock:
-                                for k in param['out']:
-                                    data[param['out'][k]] = out[k]
-
-                        if 'next' in param:
-                            for e in param['next']:
-                                task_queue.put((e, pipes))
-                        perf_queue.put((name, entry, start_time, time.time()))
-                    else:
-                        task_queue.put((entry, pipes))
+            await asyncio.gather(*[asyncio.create_task(n.run(data, queue, dynamic_tasks)) for n in self.start_nodes])
+            while not all(t.done() for t in dynamic_tasks):
+                await asyncio.gather(*dynamic_tasks)
         except Exception as e:
             error_msg = traceback.format_exc()
-            with lock: data['error_msg'] = error_msg
-            log.error(f'[{name}]:\n{error_msg}')
-            task_queue.put(('exit', {}))
-            log.debug(f'{name}, exit')
+            data['error_msg'] = error_msg
+            log.error(f'[{self.name}]:\n{error_msg}')
+        return data
 
     def mp_task(self, pid, data, task_queue, perf_queue):
         name = f'pid: {pid}'
