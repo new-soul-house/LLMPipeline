@@ -184,7 +184,7 @@ class Node:
             for k in o:
                 set_data(k, out[k], config, queue)
         elif t is dict:
-            if out is not None:
+            if out is not None and type(out) is dict:
                 for k in o: set_data(o[k], out[k], config, queue)
             else:
                 for k in o: set_data(o[k], None, config, queue)
