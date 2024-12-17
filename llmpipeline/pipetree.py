@@ -541,6 +541,9 @@ class BranchNode(Node):
                     if len(item_id) > 1 and item_id[0] == '#' and item_id[1:].isdigit() and (i := int(item_id[1:]) - 1) < len(items):
                         cond = items[i]
                         break
+                    elif len(item_id) and item_id.isdigit() and (i := int(item_id) - 1) < len(items):
+                        cond = items[i]
+                        break
                 retry += 1
         elif 'code' in self.conf:
             if 'code_entry' in self.conf:
@@ -576,6 +579,9 @@ class BranchNode(Node):
                 if cond and type(cond) is dict:
                     item_id = cond.get('item_id', '')
                     if len(item_id) > 1 and item_id[0] == '#' and item_id[1:].isdigit() and (i := int(item_id[1:]) - 1) < len(items):
+                        cond = items[i]
+                        break
+                    elif len(item_id) and item_id.isdigit() and (i := int(item_id) - 1) < len(items):
                         cond = items[i]
                         break
                 retry += 1
