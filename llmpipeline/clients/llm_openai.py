@@ -35,15 +35,24 @@ async def async_completion(text):
         max_retries=20,
         # timeout=6000.0,
     )
+    if (t := type(text)) is str:
+        msg = [
+            {
+                "role": "user",
+                "content": text,
+            }
+        ]
+    elif t is list:
+        msg = []
+        for role, c in zip(['user', 'assistant']*len(text), text):
+            msg.append({
+                "role": role,
+                "content": c,
+            })
 
     async with llm_sem:
         chat_completion = await client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": text,
-                }
-            ],
+            messages=msg,
             model=os.getenv("OPENAI_API_MODEL")
         )
 

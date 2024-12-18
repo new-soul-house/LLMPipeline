@@ -2,7 +2,9 @@ import os
 import time
 import json
 import uuid
+import asyncio
 import datetime
+import collections
 from .log import log, log_dir
 from .pipetree import PipeTree
 from .utils import check_cmd_exist, get_ordered_task
@@ -210,3 +212,20 @@ class Pipeline:
             log.debug(f"Run '{self.name}' pipeline in multiprocess")
             return self.mp_run
 
+    async def replay(self, node_name, data_arr):
+        node = self.pipetree.node_manager[node_name]
+        pipe = self.pipetree.pipe_manager.get(node_name, None)
+
+        tasks = []
+        for data in data_arr:
+            task = asyncio.create_task(node.replay(data))
+            tasks.append(task)
+        await asyncio.gather(*tasks)
+
+        ret = []
+        for data in data_arr:
+            d = {}
+            for o in node.mermaid_outs:
+                d[o] = data[o]
+            ret.append(d)
+        return ret, len(pipe.run_time) if pipe else node.run_cnt

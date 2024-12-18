@@ -16,7 +16,7 @@ if spec:
             max_model_len=max_model_len,
             pipeline_parallel_size=pp,
             tensor_parallel_size=tp)
-    sampling_params = SamplingParams(temperature=0.2,
+    sampling_params = SamplingParams(temperature=0.7,
                                     max_tokens=max_tokens,
                                     min_p=0.15,
                                     top_p=0.85)

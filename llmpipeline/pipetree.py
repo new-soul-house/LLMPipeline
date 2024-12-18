@@ -226,6 +226,15 @@ class Node:
         log.banner(f"Leave async task: {self.name}, cnt: {cnt}")
         self.tree.perf.append(('coroutine', self.name, start_time, time.time()))
 
+    async def replay(self, data):
+        self.run_cnt += 1
+        cnt = self.run_cnt
+        log.banner(f"Enter async task: {self.name}, cnt: {cnt}")
+        queue = collections.defaultdict(asyncio.Queue)
+        for k, v in data.items(): queue[k].put_nowait(v)
+        await self.current_task(data, queue, [])
+        log.banner(f"Leave async task: {self.name}, cnt: {cnt}")
+
     @property
     def run(self):
         if self.tree.is_async:
