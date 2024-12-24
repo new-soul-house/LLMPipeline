@@ -132,6 +132,7 @@ class Pipe:
 
 class LLMPipe(Pipe):
     def __init__(self, name, prompt=None, return_json=True, format=None, llm=None, verbose=True, retry=5, inp=None, out=None, lock=None, run_time=None, inout_log=None, second_round=False, **kargs):
+        if return_json: second_round = True
         super().__init__(name, lock, run_time, inout_log, verbose, retry, second_round)
         self.prompt = prompt
         self.llm = llm
